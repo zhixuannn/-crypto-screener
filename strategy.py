@@ -24,6 +24,7 @@ class Signal:
     direction: str       # 'long' or 'short'
     entry_price: float
     sl_price: float
+    tp_price: float       # 止盈價 (盈虧比1:1)
     candle_time: int     # 該K棒的收盤時間戳 (毫秒)
 
 
@@ -34,11 +35,12 @@ class _Pivot:
     bar_idx: Optional[int] = None
 
 
-def compute_signals(candles: list, swing_len: int = 5) -> list:
+def compute_signals(candles: list, swing_len: int = 5, rr: float = 1.0) -> list:
     """
     candles: [[timestamp_ms, open, high, low, close, volume], ...]，由舊到新排序，
              且必須是「已經收盤」的K棒（呼叫端要自行濾掉還在跑的那一根）。
     swing_len: 對應指標的擺動高低點週期 (預設5，跟指標一致)。
+    rr: 止盈盈虧比，止盈距離 = 止損距離 x rr (預設1.0，也就是1:1)。
 
     回傳: list[Signal]，包含這段資料裡所有觸發過的訊號 (通常呼叫端只關心
           最後一根K棒 index == len(candles)-1 是否有新訊號)。
@@ -183,23 +185,27 @@ def compute_signals(candles: list, swing_len: int = 5) -> list:
             if not entry_bull_used[0] and close[i] > ob_top and close[i - 1] <= ob_top:
                 entry_bull_used[0] = True
                 sl = entry_bull_bot[1] if len(entry_bull_bot) > 1 else entry_bull_bot[0]
-                signals.append(Signal(index=i, direction='long', entry_price=close[i], sl_price=sl, candle_time=ts[i]))
+                risk = close[i] - sl
+                tp = close[i] + risk * rr
+                signals.append(Signal(index=i, direction='long', entry_price=close[i], sl_price=sl, tp_price=tp, candle_time=ts[i]))
 
         if i >= 1 and bear_trend_confirmed and entry_bear_bot:
             ob_bot = entry_bear_bot[0]
             if not entry_bear_used[0] and close[i] < ob_bot and close[i - 1] >= ob_bot:
                 entry_bear_used[0] = True
                 sl = entry_bear_top[1] if len(entry_bear_top) > 1 else entry_bear_top[0]
-                signals.append(Signal(index=i, direction='short', entry_price=close[i], sl_price=sl, candle_time=ts[i]))
+                risk = sl - close[i]
+                tp = close[i] - risk * rr
+                signals.append(Signal(index=i, direction='short', entry_price=close[i], sl_price=sl, tp_price=tp, candle_time=ts[i]))
 
     return signals
 
 
-def get_latest_signal(candles: list, swing_len: int = 5) -> Optional[Signal]:
+def get_latest_signal(candles: list, swing_len: int = 5, rr: float = 1.0) -> Optional[Signal]:
     """只關心『最後一根K棒』有沒有觸發新訊號，用於實際掃描時呼叫。"""
     if not candles:
         return None
-    signals = compute_signals(candles, swing_len=swing_len)
+    signals = compute_signals(candles, swing_len=swing_len, rr=rr)
     last_idx = len(candles) - 1
     for sig in signals:
         if sig.index == last_idx:
