@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: xuan-bingx-screener
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --workers 1 --threads 4 --timeout 120
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: SCAN_TIMEFRAME
+        value: 5m
+      - key: SCAN_INTERVAL_MINUTES
+        value: 5
+      - key: SWING_LENGTH
+        value: 5
+      - key: CANDLE_LIMIT
+        value: 500
+      - key: SCAN_MAX_WORKERS
+        value: 5
