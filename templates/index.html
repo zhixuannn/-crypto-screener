@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>XUAN 3+1 BingX 訊號掃描</title>
+    <meta http-equiv="refresh" content="60">
+    <style>
+        body {
+            font-family: -apple-system, "Segoe UI", "Microsoft JhengHei", sans-serif;
+            background: #0f1115;
+            color: #e6e6e6;
+            margin: 0;
+            padding: 24px;
+        }
+        h1 { font-size: 20px; margin-bottom: 4px; }
+        .sub { color: #9aa0a6; font-size: 13px; margin-bottom: 20px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td {
+            text-align: left;
+            padding: 10px 12px;
+            border-bottom: 1px solid #262a33;
+            font-size: 14px;
+        }
+        th { color: #9aa0a6; font-weight: 500; }
+        .long { color: #26a69a; font-weight: 600; }
+        .short { color: #ef5350; font-weight: 600; }
+        .empty { color: #9aa0a6; padding: 40px 0; text-align: center; }
+    </style>
+</head>
+<body>
+    <h1>XUAN 3+1 BingX 訊號掃描</h1>
+    <div class="sub">週期: {{ timeframe }}　|　每60秒自動重整這個頁面</div>
+
+    {% if signals %}
+    <table>
+        <thead>
+            <tr>
+                <th>時間</th>
+                <th>幣種</th>
+                <th>方向</th>
+                <th>進場價</th>
+                <th>止損價</th>
+                <th>止損距離</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for s in signals %}
+            <tr>
+                <td>{{ s.time_str }}</td>
+                <td>{{ s.symbol }}</td>
+                <td class="{{ 'long' if s.direction == 'long' else 'short' }}">
+                    {{ '做多' if s.direction == 'long' else '做空' }}
+                </td>
+                <td>{{ s.entry_price }}</td>
+                <td>{{ s.sl_price }}</td>
+                <td>{{ '%.2f' % ((s.entry_price - s.sl_price) / s.entry_price * 100 if s.direction == 'long' else (s.sl_price - s.entry_price) / s.entry_price * 100) }}%</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty">目前還沒有偵測到任何訊號</div>
+    {% endif %}
+</body>
+</html>
