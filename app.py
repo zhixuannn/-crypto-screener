@@ -27,6 +27,7 @@ SCAN_INTERVAL_MINUTES = int(os.environ.get('SCAN_INTERVAL_MINUTES', '5'))
 SWING_LENGTH = int(os.environ.get('SWING_LENGTH', '5'))
 CANDLE_LIMIT = int(os.environ.get('CANDLE_LIMIT', '500'))
 MAX_WORKERS = int(os.environ.get('SCAN_MAX_WORKERS', '5'))
+TP_RR = float(os.environ.get('TP_RR', '1.0'))   # 止盈盈虧比，預設1:1
 
 app = Flask(__name__)
 
@@ -40,17 +41,67 @@ def scan_one_symbol(symbol: str):
         )
         if len(candles) < SWING_LENGTH * 3:
             return symbol, None
-        signal = get_latest_signal(candles, swing_len=SWING_LENGTH)
+        signal = get_latest_signal(candles, swing_len=SWING_LENGTH, rr=TP_RR)
         return symbol, signal
     except Exception as e:
         logger.warning(f'掃描 {symbol} 失敗: {e}')
         return symbol, None
 
 
+def check_open_signal(row: dict):
+    """檢查單一筆『還沒結束』的訊號，最新K棒有沒有碰到止盈或止損。"""
+    symbol = row['symbol']
+    try:
+        exchange = exchange_client.get_exchange()
+        candles = exchange_client.fetch_closed_candles(exchange, symbol, timeframe=TIMEFRAME, limit=2)
+        if not candles:
+            return
+        last_high, last_low = candles[-1][2], candles[-1][3]
+
+        direction = row['direction']
+        sl = row['sl_price']
+        tp = row['tp_price']
+
+        hit_sl = hit_tp = False
+        if direction == 'long':
+            if last_low <= sl:
+                hit_sl = True
+            elif tp is not None and last_high >= tp:
+                hit_tp = True
+        else:
+            if last_high >= sl:
+                hit_sl = True
+            elif tp is not None and last_low <= tp:
+                hit_tp = True
+
+        if hit_sl or hit_tp:
+            status = 'tp_hit' if hit_tp else 'sl_hit'
+            exit_price = tp if hit_tp else sl
+            database.close_signal(row['id'], status, int(time.time() * 1000))
+            message = notifier.format_close_message(symbol, direction, status, row['entry_price'], exit_price)
+            notifier.send_telegram_message(message)
+            logger.info(f'{symbol} {direction} 已{"止盈" if hit_tp else "止損"}')
+    except Exception as e:
+        logger.warning(f'檢查未平倉訊號 {symbol} 失敗: {e}')
+
+
+def check_open_signals():
+    """檢查所有『還沒結束』的訊號，這個函式會在每次掃描時先執行。"""
+    open_signals = database.get_open_signals()
+    if not open_signals:
+        return
+    logger.info(f'檢查 {len(open_signals)} 筆未平倉訊號...')
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+        list(pool.map(check_open_signal, open_signals))
+
+
 def scan_market():
     """掃描整個市場，這個函式會被排程器定期呼叫。"""
     start_time = time.time()
     logger.info('開始掃描市場...')
+
+    # 先檢查手上『還沒結束』的訊號有沒有止盈/止損
+    check_open_signals()
 
     try:
         exchange = exchange_client.get_exchange()
@@ -75,11 +126,11 @@ def scan_market():
 
             detected_at = int(time.time() * 1000)
             database.record_signal(
-                symbol, signal.direction, signal.entry_price, signal.sl_price,
+                symbol, signal.direction, signal.entry_price, signal.sl_price, signal.tp_price,
                 signal.candle_time, detected_at
             )
             message = notifier.format_signal_message(
-                symbol, signal.direction, signal.entry_price, signal.sl_price, TIMEFRAME
+                symbol, signal.direction, signal.entry_price, signal.sl_price, signal.tp_price, TIMEFRAME
             )
             notifier.send_telegram_message(message)
             found_count += 1
@@ -98,6 +149,12 @@ def index():
         dt_local = dt.astimezone()  # 轉成伺服器當地時區顯示
         s['time_str'] = dt_local.strftime('%Y-%m-%d %H:%M')
     return render_template('index.html', signals=signals, timeframe=TIMEFRAME)
+
+
+@app.route('/chart/<path:symbol>')
+def chart(symbol):
+    tv_symbol = database.symbol_to_tradingview(symbol)
+    return render_template('chart.html', symbol=symbol, tv_symbol=tv_symbol)
 
 
 @app.route('/health')
