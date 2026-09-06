@@ -1,213 +1,203 @@
 """
-XUAN 3+1 策略邏輯 (Python 版本)
-忠實移植自 Pine Script 版本的 XUAN3+1 指標核心邏輯：
-- 結構判斷 (BOS / CHoCH)：用「leg」演算法偵測擺動高低點，用收盤價突破判斷結構
-- 訂單塊 (Order Block)：不使用ATR過濾，直接用原始高低點
-  - 多頭結構突破時：訂單塊 = 從「前一個擺動高點」到現在，中間最低點的那根K棒
-  - 空頭結構突破時：訂單塊 = 從「前一個擺動低點」到現在，中間最高點的那根K棒
-- FVG (失衡區)：經典3根K棒跳空公式，且要求跳空前一根是順勢的實體K棒
-- 進場四條件：CHoCH + FVG + BOS (同方向，順序不限) + 收盤價收在「最新那個」訂單塊之外
-  - 只有清單裡「最新的」訂單塊有資格觸發進場；一旦出現更新的訂單塊，舊的就算沒用過也作廢
-  - 只要沒出現「反方向CHoCH」，這輪循環就一直有效
-- 止損：抓「觸發這次訊號的訂單塊」的前一個(比較早形成的那個)；如果它就是最早那個，就用它自己
+XUAN 3+1 策略邏輯 (Python 版本，狀態持久化版)
+與原版邏輯完全相同 (CHoCH+FVG+BOS+訂單塊四條件)，差別在於：
+- 不再每次重新計算整批K棒，而是把「運算到一半的狀態」存起來，
+  之後只需要把新出現的K棒一根一根餵進來繼續算，效果等同 Pine Script
+  「從指標第一次加到圖表上就沒停過」的連續性
+- 訂單塊改成「即時追蹤」：擺動高/低點一形成，就開始邊收K棒邊追蹤
+  目前為止的最低點/最高點在哪根，等到真正被突破時直接拿來當作訂單塊
 """
 
-from dataclasses import dataclass, field
+import json
+from dataclasses import dataclass
 from typing import Optional
 
-ENTRY_OB_CAP = 5  # 每個方向最多保留幾個訂單塊 (跟指標一致)
+ENTRY_OB_CAP = 5
 
 
 @dataclass
 class Signal:
-    index: int          # 觸發訊號的K棒索引 (0 = 最舊)
-    direction: str       # 'long' or 'short'
+    direction: str        # 'long' or 'short'
     entry_price: float
     sl_price: float
-    tp_price: float       # 止盈價 (盈虧比1:1)
-    candle_time: int     # 該K棒的收盤時間戳 (毫秒)
+    tp_price: float
+    candle_time: int      # 觸發訊號那根K棒的時間戳 (毫秒)
 
 
-@dataclass
-class _Pivot:
-    level: Optional[float] = None
-    crossed: bool = True
-    bar_idx: Optional[int] = None
+def new_state(swing_len: int = 5) -> dict:
+    """建立一個全新、空白的狀態 (新幣種第一次追蹤時使用)。"""
+    return {
+        'swing_len': swing_len,
+        'leg_val': 0,
+        'buffer': [],       # 最近幾根K棒 [[time,open,high,low,close], ...]
+        'swing_high': None,  # {'level','bar_time','crossed','ob_bar_high','ob_bar_low','ob_bar_time'}
+        'swing_low': None,
+        'trend_bias': 0,
+        'entry_bull_top': [], 'entry_bull_bot': [], 'entry_bull_used': [],
+        'entry_bear_top': [], 'entry_bear_bot': [], 'entry_bear_used': [],
+        'bull_choch_flag': False, 'bull_fvg_flag': False, 'bull_bos_flag': False,
+        'bear_choch_flag': False, 'bear_fvg_flag': False, 'bear_bos_flag': False,
+    }
 
 
-def compute_signals(candles: list, swing_len: int = 5, rr: float = 1.0) -> list:
+def state_to_json(state: dict) -> str:
+    return json.dumps(state)
+
+
+def state_from_json(state_json: str) -> dict:
+    return json.loads(state_json)
+
+
+def advance_state(state: dict, candles: list, rr: float = 1.0):
     """
-    candles: [[timestamp_ms, open, high, low, close, volume], ...]，由舊到新排序，
-             且必須是「已經收盤」的K棒（呼叫端要自行濾掉還在跑的那一根）。
-    swing_len: 對應指標的擺動高低點週期 (預設5，跟指標一致)。
-    rr: 止盈盈虧比，止盈距離 = 止損距離 x rr (預設1.0，也就是1:1)。
-
-    回傳: list[Signal]，包含這段資料裡所有觸發過的訊號 (通常呼叫端只關心
-          最後一根K棒 index == len(candles)-1 是否有新訊號)。
+    把一批「新出現的、已收盤的」K棒依序餵進狀態裡繼續運算。
+    candles: [[timestamp_ms, open, high, low, close, volume], ...]，由舊到新排序。
+    回傳: (更新後的狀態dict, 這批K棒裡新觸發的訊號list[Signal])
     """
-    n = len(candles)
-    if n < swing_len * 3:
-        return []
+    swing_len = state['swing_len']
+    buf = state['buffer']
+    signals = []
+    required_len = max(swing_len + 1, 3)
 
-    ts    = [c[0] for c in candles]
-    open_ = [c[1] for c in candles]
-    high  = [c[2] for c in candles]
-    low   = [c[3] for c in candles]
-    close = [c[4] for c in candles]
+    for candle in candles:
+        buf.append(list(candle[:5]))
+        if len(buf) > required_len:
+            buf.pop(0)
+        n = len(buf)
+        ts, o, h, l, c = buf[-1]
+        prev_close = buf[-2][4] if n >= 2 else None
 
-    leg_val = 0          # 0 = BEARISH_LEG, 1 = BULLISH_LEG
-    swing_high = _Pivot()
-    swing_low  = _Pivot()
-    trend_bias = 0        # 0=未確立, 1=多頭, -1=空頭
+        # ---- 先更新「目前待突破的擺動點」的即時追蹤 (用這根新K棒) ----
+        sh = state['swing_high']
+        if sh is not None and not sh['crossed']:
+            if l < sh['ob_bar_low']:
+                sh['ob_bar_low'] = l
+                sh['ob_bar_high'] = h
+                sh['ob_bar_time'] = ts
+        sw_low = state['swing_low']
+        if sw_low is not None and not sw_low['crossed']:
+            if h > sw_low['ob_bar_high']:
+                sw_low['ob_bar_high'] = h
+                sw_low['ob_bar_low'] = l
+                sw_low['ob_bar_time'] = ts
 
-    entry_bull_top: list = []
-    entry_bull_bot: list = []
-    entry_bull_used: list = []
-    entry_bear_top: list = []
-    entry_bear_bot: list = []
-    entry_bear_used: list = []
-
-    bull_choch_flag = bull_fvg_flag = bull_bos_flag = False
-    bear_choch_flag = bear_fvg_flag = bear_bos_flag = False
-
-    signals: list = []
-
-    for i in range(n):
-        # ---------------- 擺動高低點 (leg) ----------------
-        if i - swing_len >= 0:
-            window_start = max(0, i - swing_len + 1)
-            hh = max(high[window_start:i + 1])
-            ll = min(low[window_start:i + 1])
-            old_high = high[i - swing_len]
-            old_low  = low[i - swing_len]
+        # ---- 擺動高低點 (leg) 判斷 ----
+        if n >= swing_len + 1:
+            window = buf[-swing_len:]
+            hh = max(b[2] for b in window)
+            ll = min(b[3] for b in window)
+            old = buf[-(swing_len + 1)]
+            old_time, old_o, old_high, old_low, old_close = old
 
             new_leg_high = old_high > hh
-            new_leg_low  = old_low < ll
-
-            prev_leg = leg_val
+            new_leg_low = old_low < ll
+            prev_leg = state['leg_val']
             if new_leg_high:
-                leg_val = 0
+                state['leg_val'] = 0
             elif new_leg_low:
-                leg_val = 1
+                state['leg_val'] = 1
 
-            if leg_val != prev_leg:
-                if leg_val == 1:
-                    swing_low = _Pivot(level=old_low, crossed=False, bar_idx=i - swing_len)
+            if state['leg_val'] != prev_leg:
+                pivot_range = buf[-(swing_len + 1):]
+                if state['leg_val'] == 1:
+                    # 新的擺動低點形成 → 之後用來偵測「空頭結構突破」，訂單塊追蹤「最高的高點」
+                    ob_candle = max(pivot_range, key=lambda b: b[2])
+                    state['swing_low'] = {
+                        'level': old_low, 'bar_time': old_time, 'crossed': False,
+                        'ob_bar_high': ob_candle[2], 'ob_bar_low': ob_candle[3], 'ob_bar_time': ob_candle[0],
+                    }
                 else:
-                    swing_high = _Pivot(level=old_high, crossed=False, bar_idx=i - swing_len)
+                    # 新的擺動高點形成 → 之後用來偵測「多頭結構突破」，訂單塊追蹤「最低的低點」
+                    ob_candle = min(pivot_range, key=lambda b: b[3])
+                    state['swing_high'] = {
+                        'level': old_high, 'bar_time': old_time, 'crossed': False,
+                        'ob_bar_high': ob_candle[2], 'ob_bar_low': ob_candle[3], 'ob_bar_time': ob_candle[0],
+                    }
 
-        # ---------------- 結構判斷 (BOS / CHoCH) ----------------
+        # ---- 結構判斷 (BOS / CHoCH) ----
         bull_choch = bull_bos = bear_choch = bear_bos = False
 
-        if i >= 1 and swing_high.level is not None and not swing_high.crossed:
-            if close[i] > swing_high.level and close[i - 1] <= swing_high.level:
-                swing_high.crossed = True
-                is_choch = trend_bias == -1
-                trend_bias = 1
-                bull_choch = is_choch
-                bull_bos = not is_choch
+        sh = state['swing_high']
+        if sh is not None and not sh['crossed'] and prev_close is not None:
+            if c > sh['level'] and prev_close <= sh['level']:
+                sh['crossed'] = True
+                is_choch = state['trend_bias'] == -1
+                state['trend_bias'] = 1
+                bull_choch, bull_bos = is_choch, not is_choch
 
-                start_idx = swing_high.bar_idx
-                sub_low = low[start_idx:i + 1]
-                ob_bar = start_idx + sub_low.index(min(sub_low))
-                ob_top, ob_bot = high[ob_bar], low[ob_bar]
+                state['entry_bull_top'].insert(0, sh['ob_bar_high'])
+                state['entry_bull_bot'].insert(0, sh['ob_bar_low'])
+                state['entry_bull_used'].insert(0, False)
+                if len(state['entry_bull_top']) > ENTRY_OB_CAP:
+                    state['entry_bull_top'].pop()
+                    state['entry_bull_bot'].pop()
+                    state['entry_bull_used'].pop()
 
-                entry_bull_top.insert(0, ob_top)
-                entry_bull_bot.insert(0, ob_bot)
-                entry_bull_used.insert(0, False)
-                if len(entry_bull_top) > ENTRY_OB_CAP:
-                    entry_bull_top.pop()
-                    entry_bull_bot.pop()
-                    entry_bull_used.pop()
+        sw_low = state['swing_low']
+        if sw_low is not None and not sw_low['crossed'] and prev_close is not None:
+            if c < sw_low['level'] and prev_close >= sw_low['level']:
+                sw_low['crossed'] = True
+                is_choch2 = state['trend_bias'] == 1
+                state['trend_bias'] = -1
+                bear_choch, bear_bos = is_choch2, not is_choch2
 
-        if i >= 1 and swing_low.level is not None and not swing_low.crossed:
-            if close[i] < swing_low.level and close[i - 1] >= swing_low.level:
-                swing_low.crossed = True
-                is_choch2 = trend_bias == 1
-                trend_bias = -1
-                bear_choch = is_choch2
-                bear_bos = not is_choch2
+                state['entry_bear_top'].insert(0, sw_low['ob_bar_high'])
+                state['entry_bear_bot'].insert(0, sw_low['ob_bar_low'])
+                state['entry_bear_used'].insert(0, False)
+                if len(state['entry_bear_top']) > ENTRY_OB_CAP:
+                    state['entry_bear_top'].pop()
+                    state['entry_bear_bot'].pop()
+                    state['entry_bear_used'].pop()
 
-                start_idx = swing_low.bar_idx
-                sub_high = high[start_idx:i + 1]
-                ob_bar = start_idx + sub_high.index(max(sub_high))
-                ob_top, ob_bot = high[ob_bar], low[ob_bar]
-
-                entry_bear_top.insert(0, ob_top)
-                entry_bear_bot.insert(0, ob_bot)
-                entry_bear_used.insert(0, False)
-                if len(entry_bear_top) > ENTRY_OB_CAP:
-                    entry_bear_top.pop()
-                    entry_bear_bot.pop()
-                    entry_bear_used.pop()
-
-        # ---------------- FVG ----------------
+        # ---- FVG ----
         bull_fvg = bear_fvg = False
-        if i >= 2:
-            if low[i] > high[i - 2] and close[i - 1] > high[i - 2] and (close[i - 1] - open_[i - 1]) > 0:
+        if n >= 3:
+            b_prev2, b_prev1, b_cur = buf[-3], buf[-2], buf[-1]
+            _, o1, h1, l1, c1 = b_prev1
+            h_prev2, l_prev2 = b_prev2[2], b_prev2[3]
+            _, _, _, l_cur, _ = b_cur[:5] if False else (None, None, None, buf[-1][3], None)
+            h_cur, l_cur = buf[-1][2], buf[-1][3]
+            if l_cur > h_prev2 and c1 > h_prev2 and (c1 - o1) > 0:
                 bull_fvg = True
-            if high[i] < low[i - 2] and close[i - 1] < low[i - 2] and (close[i - 1] - open_[i - 1]) < 0:
+            if h_cur < l_prev2 and c1 < l_prev2 and (c1 - o1) < 0:
                 bear_fvg = True
 
-        # ---------------- 四條件旗標 (反方向CHoCH才重置) ----------------
+        # ---- 四條件旗標 (反方向CHoCH才重置) ----
         if bear_choch:
-            bull_choch_flag = bull_fvg_flag = bull_bos_flag = False
-            entry_bull_top.clear()
-            entry_bull_bot.clear()
-            entry_bull_used.clear()
-
+            state['bull_choch_flag'] = state['bull_fvg_flag'] = state['bull_bos_flag'] = False
+            state['entry_bull_top'].clear(); state['entry_bull_bot'].clear(); state['entry_bull_used'].clear()
         if bull_choch:
-            bear_choch_flag = bear_fvg_flag = bear_bos_flag = False
-            entry_bear_top.clear()
-            entry_bear_bot.clear()
-            entry_bear_used.clear()
+            state['bear_choch_flag'] = state['bear_fvg_flag'] = state['bear_bos_flag'] = False
+            state['entry_bear_top'].clear(); state['entry_bear_bot'].clear(); state['entry_bear_used'].clear()
 
-        if bull_choch:
-            bull_choch_flag = True
-        if bull_fvg:
-            bull_fvg_flag = True
-        if bull_bos:
-            bull_bos_flag = True
+        if bull_choch: state['bull_choch_flag'] = True
+        if bull_fvg: state['bull_fvg_flag'] = True
+        if bull_bos: state['bull_bos_flag'] = True
+        if bear_choch: state['bear_choch_flag'] = True
+        if bear_fvg: state['bear_fvg_flag'] = True
+        if bear_bos: state['bear_bos_flag'] = True
 
-        if bear_choch:
-            bear_choch_flag = True
-        if bear_fvg:
-            bear_fvg_flag = True
-        if bear_bos:
-            bear_bos_flag = True
+        bull_trend_confirmed = state['bull_choch_flag'] and state['bull_fvg_flag'] and state['bull_bos_flag']
+        bear_trend_confirmed = state['bear_choch_flag'] and state['bear_fvg_flag'] and state['bear_bos_flag']
 
-        bull_trend_confirmed = bull_choch_flag and bull_fvg_flag and bull_bos_flag
-        bear_trend_confirmed = bear_choch_flag and bear_fvg_flag and bear_bos_flag
+        # ---- 進場訊號：只看最新的訂單塊 ----
+        if bull_trend_confirmed and state['entry_bull_top'] and prev_close is not None:
+            ob_top = state['entry_bull_top'][0]
+            if not state['entry_bull_used'][0] and c > ob_top and prev_close <= ob_top:
+                state['entry_bull_used'][0] = True
+                sl = state['entry_bull_bot'][1] if len(state['entry_bull_bot']) > 1 else state['entry_bull_bot'][0]
+                risk = c - sl
+                tp = c + risk * rr
+                signals.append(Signal(direction='long', entry_price=c, sl_price=sl, tp_price=tp, candle_time=ts))
 
-        # ---------------- 進場訊號：只看最新的訂單塊 ----------------
-        if i >= 1 and bull_trend_confirmed and entry_bull_top:
-            ob_top = entry_bull_top[0]
-            if not entry_bull_used[0] and close[i] > ob_top and close[i - 1] <= ob_top:
-                entry_bull_used[0] = True
-                sl = entry_bull_bot[1] if len(entry_bull_bot) > 1 else entry_bull_bot[0]
-                risk = close[i] - sl
-                tp = close[i] + risk * rr
-                signals.append(Signal(index=i, direction='long', entry_price=close[i], sl_price=sl, tp_price=tp, candle_time=ts[i]))
+        if bear_trend_confirmed and state['entry_bear_bot'] and prev_close is not None:
+            ob_bot = state['entry_bear_bot'][0]
+            if not state['entry_bear_used'][0] and c < ob_bot and prev_close >= ob_bot:
+                state['entry_bear_used'][0] = True
+                sl = state['entry_bear_top'][1] if len(state['entry_bear_top']) > 1 else state['entry_bear_top'][0]
+                risk = sl - c
+                tp = c - risk * rr
+                signals.append(Signal(direction='short', entry_price=c, sl_price=sl, tp_price=tp, candle_time=ts))
 
-        if i >= 1 and bear_trend_confirmed and entry_bear_bot:
-            ob_bot = entry_bear_bot[0]
-            if not entry_bear_used[0] and close[i] < ob_bot and close[i - 1] >= ob_bot:
-                entry_bear_used[0] = True
-                sl = entry_bear_top[1] if len(entry_bear_top) > 1 else entry_bear_top[0]
-                risk = sl - close[i]
-                tp = close[i] - risk * rr
-                signals.append(Signal(index=i, direction='short', entry_price=close[i], sl_price=sl, tp_price=tp, candle_time=ts[i]))
-
-    return signals
-
-
-def get_latest_signal(candles: list, swing_len: int = 5, rr: float = 1.0) -> Optional[Signal]:
-    """只關心『最後一根K棒』有沒有觸發新訊號，用於實際掃描時呼叫。"""
-    if not candles:
-        return None
-    signals = compute_signals(candles, swing_len=swing_len, rr=rr)
-    last_idx = len(candles) - 1
-    for sig in signals:
-        if sig.index == last_idx:
-            return sig
-    return None
+    state['buffer'] = buf
+    return state, signals
