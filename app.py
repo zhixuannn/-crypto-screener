@@ -1,6 +1,6 @@
 """
 XUAN 3+1 BingX 訊號掃描網站 (狀態持久化版)
-- 幣種範圍：CoinMarketCap 市值前100大 ∩ BingX 有永續合約的幣種
+- 幣種範圍：CoinMarketCap 市值前100大 ∩ BingX 有永續合約的幣種，排除穩定幣
 - 每 SCAN_INTERVAL_MINUTES 分鐘，讀取每個幣種上次存的策略狀態，
   只把「新出現的、已收盤」的K棒餵進去繼續運算，不再每次從頭重算
 - 有新訊號就存進資料庫，並發送 Telegram 通知
@@ -27,9 +27,14 @@ logger = logging.getLogger(__name__)
 TIMEFRAME = os.environ.get('SCAN_TIMEFRAME', '5m')
 SCAN_INTERVAL_MINUTES = int(os.environ.get('SCAN_INTERVAL_MINUTES', '5'))
 SWING_LENGTH = int(os.environ.get('SWING_LENGTH', '5'))
-BOOTSTRAP_CANDLE_LIMIT = int(os.environ.get('BOOTSTRAP_CANDLE_LIMIT', '2000'))
+BOOTSTRAP_CANDLE_LIMIT = int(os.environ.get('BOOTSTRAP_CANDLE_LIMIT', '1000'))
 MAX_WORKERS = int(os.environ.get('SCAN_MAX_WORKERS', '5'))
 TP_RR = float(os.environ.get('TP_RR', '1.0'))
+
+STABLECOIN_SYMBOLS = {
+    'USDT', 'USDC', 'DAI', 'BUSD', 'TUSD', 'USDD',
+    'USDP', 'FDUSD', 'PYUSD', 'USDE', 'FRAX', 'GUSD'
+}
 
 app = Flask(__name__)
 
@@ -45,14 +50,17 @@ def build_bingx_symbol_map(exchange) -> dict:
 
 
 def get_scan_symbols() -> list:
-    """回傳這次要掃描的完整幣種清單 (CMC前100大 ∩ BingX有上架的)。BingX沒上架的直接跳過。"""
+    """回傳這次要掃描的完整幣種清單 (CMC前100大 ∩ BingX有上架的，排除穩定幣)。"""
     exchange = exchange_client.get_exchange()
     cmc_symbols = cmc_client.get_top100_symbols()
     if not cmc_symbols:
         logger.warning('CMC前100大名單目前是空的(可能API Key未設定或第一次呼叫失敗)')
         return []
     bingx_map = build_bingx_symbol_map(exchange)
-    scan_list = [bingx_map[sym] for sym in cmc_symbols if sym in bingx_map]
+    scan_list = [
+        bingx_map[sym] for sym in cmc_symbols
+        if sym in bingx_map and sym.upper() not in STABLECOIN_SYMBOLS
+    ]
     return scan_list
 
 
@@ -161,7 +169,7 @@ def scan_market():
         logger.warning('這次掃描沒有可用的幣種清單，跳過本輪')
         return
 
-    logger.info(f'共 {len(symbols)} 個幣種 (CMC前100大 ∩ BingX永續)，開始逐一掃描 (併發數: {MAX_WORKERS})')
+    logger.info(f'共 {len(symbols)} 個幣種 (CMC前100大 ∩ BingX永續，已排除穩定幣)，開始逐一掃描 (併發數: {MAX_WORKERS})')
 
     found_count = 0
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
