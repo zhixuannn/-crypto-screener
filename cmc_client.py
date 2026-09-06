@@ -28,3 +28,28 @@ def get_top100_symbols(force_refresh: bool = False) -> list:
     global _cache_symbols, _cache_time
 
     now = time.time()
+    cache_is_fresh = (now - _cache_time) < CACHE_TTL_SECONDS
+
+    if cache_is_fresh and not force_refresh and _cache_symbols:
+        return _cache_symbols
+
+    if not CMC_API_KEY:
+        logger.error('CMC_API_KEY 未設定，無法取得前100大名單')
+        return _cache_symbols
+
+    try:
+        headers = {'X-CMC_PRO_API_KEY': CMC_API_KEY}
+        params = {'start': 1, 'limit': TOP_N, 'sort': 'market_cap', 'convert': 'USD'}
+        resp = requests.get(CMC_URL, headers=headers, params=params, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+
+        symbols = [item['symbol'] for item in data.get('data', [])]
+        if symbols:
+            _cache_symbols = symbols
+            _cache_time = now
+            logger.info(f'已更新CMC前{TOP_N}大名單，共 {len(symbols)} 個幣種')
+        return _cache_symbols
+    except Exception as e:
+        logger.warning(f'取得CMC前100大名單失敗: {e}，使用舊快取')
+        return _cache_symbols
