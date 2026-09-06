@@ -5,14 +5,17 @@ XUAN 3+1 BingX 訊號掃描網站 (狀態持久化版)
   只把「新出現的、已收盤」的K棒餵進去繼續運算，不再每次從頭重算
 - 有新訊號就存進資料庫，並發送 Telegram 通知
 - 網頁首頁顯示最近的訊號列表，以及目前掃描中的幣種清單
+- /api/data 提供 JSON 格式的最新資料，讓前端用背景輪詢方式更新畫面，
+  不需要整頁重新整理 (圖表區塊才不會被打斷)
 """
 
 import os
 import time
+import datetime
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from flask import Flask, render_template
+from flask import Flask, render_template, jsonify
 from apscheduler.schedulers.background import BackgroundScheduler
 
 import database
@@ -213,9 +216,8 @@ def scan_market():
     logger.info(f'掃描完成，耗時 {elapsed:.1f} 秒，共 {found_count} 個新訊號')
 
 
-@app.route('/')
-def index():
-    import datetime
+def build_dashboard_data() -> dict:
+    """整理首頁需要的所有資料，index()跟/api/data共用同一份邏輯，避免兩邊寫法對不起來。"""
     signals = database.get_recent_signals(limit=100)
     now_ms = int(time.time() * 1000)
     for s in signals:
@@ -223,13 +225,13 @@ def index():
         dt_local = dt.astimezone()
         s['time_str'] = dt_local.strftime('%Y-%m-%d %H:%M')
         s['ago_str'] = time_ago_str(s['detected_at'], now_ms)
+        s['base_symbol'] = s['symbol'].split('/')[0]
 
     open_signals = [s for s in signals if s['status'] == 'open']
     closed_signals = [s for s in signals if s['status'] != 'open']
 
     scan_symbols_raw, symbols_updated_at = database.get_scan_symbols_cached()
     scan_symbols = [s.split('/')[0] for s in scan_symbols_raw]
-    tv_symbol_map = {s.split('/')[0]: database.symbol_to_tradingview(s) for s in scan_symbols_raw}
     symbols_updated_str = None
     if symbols_updated_at:
         dt = datetime.datetime.fromtimestamp(symbols_updated_at / 1000, tz=datetime.timezone.utc)
@@ -237,13 +239,26 @@ def index():
 
     overall_stats, per_symbol_stats = database.get_stats()
 
-    return render_template(
-        'index.html', signals=signals, open_signals=open_signals, closed_signals=closed_signals,
-        timeframe=TIMEFRAME,
-        scan_symbols=scan_symbols, symbols_count=len(scan_symbols),
-        symbols_updated_str=symbols_updated_str, tv_symbol_map=tv_symbol_map,
-        overall_stats=overall_stats, per_symbol_stats=per_symbol_stats
-    )
+    return {
+        'open_signals': open_signals,
+        'closed_signals': closed_signals,
+        'scan_symbols': scan_symbols,
+        'symbols_count': len(scan_symbols),
+        'symbols_updated_str': symbols_updated_str,
+        'overall_stats': overall_stats,
+        'per_symbol_stats': per_symbol_stats,
+        'timeframe': TIMEFRAME,
+    }
+
+
+@app.route('/')
+def index():
+    return render_template('index.html', timeframe=TIMEFRAME)
+
+
+@app.route('/api/data')
+def api_data():
+    return jsonify(build_dashboard_data())
 
 
 @app.route('/chart/<path:symbol>')
