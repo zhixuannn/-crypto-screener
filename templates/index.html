@@ -26,11 +26,53 @@
         .long { color: #26a69a; font-weight: 600; }
         .short { color: #ef5350; font-weight: 600; }
         .empty { color: #9aa0a6; padding: 40px 0; text-align: center; }
+
+        .symbols-box {
+            background: #171a21;
+            border: 1px solid #262a33;
+            border-radius: 8px;
+            padding: 16px 20px;
+            margin-bottom: 28px;
+        }
+        .symbols-title {
+            font-size: 14px;
+            color: #9aa0a6;
+            margin-bottom: 10px;
+        }
+        .symbols-title b { color: #e6e6e6; }
+        .symbol-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+        .symbol-tag {
+            background: #262a33;
+            color: #c9cdd3;
+            font-size: 12px;
+            padding: 4px 10px;
+            border-radius: 12px;
+        }
     </style>
 </head>
 <body>
     <h1>XUAN 3+1 BingX 訊號掃描</h1>
     <div class="sub">週期: {{ timeframe }}　|　每60秒自動重整這個頁面</div>
+
+    <div class="symbols-box">
+        <div class="symbols-title">
+            目前掃描中：<b>{{ symbols_count }}</b> 個幣種 (CMC前100大 ∩ BingX永續，已排除穩定幣)
+            {% if symbols_updated_str %}　|　名單更新於 {{ symbols_updated_str }}{% endif %}
+        </div>
+        {% if scan_symbols %}
+        <div class="symbol-tags">
+            {% for sym in scan_symbols %}
+            <span class="symbol-tag">{{ sym }}</span>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty" style="padding: 10px 0;">名單還沒抓到，稍等下一輪掃描</div>
+        {% endif %}
+    </div>
 
     {% if signals %}
     <table>
