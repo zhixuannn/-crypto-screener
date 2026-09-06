@@ -29,266 +29,47 @@
             padding: 28px 24px 60px;
         }
         .mono { font-family: 'IBM Plex Mono', monospace; }
-
         header { margin-bottom: 24px; }
-        h1 {
-            font-size: 19px;
-            font-weight: 600;
-            margin: 0 0 6px;
-            color: var(--gold-bright);
-            letter-spacing: 0.2px;
-        }
+        h1 { font-size: 19px; font-weight: 600; margin: 0 0 6px; color: var(--gold-bright); letter-spacing: 0.2px; }
         .sub { color: var(--text-dim); font-size: 13px; }
-
-        .section-head {
-            position: relative;
-            padding-left: 14px;
-            margin: 32px 0 14px;
-            font-size: 14px;
-            font-weight: 600;
-            color: var(--text);
-        }
-        .section-head::before {
-            content: '';
-            position: absolute;
-            left: 0; top: 2px; bottom: 2px;
-            width: 3px;
-            background: var(--gold);
-        }
+        .section-head { position: relative; padding-left: 14px; margin: 32px 0 14px; font-size: 14px; font-weight: 600; color: var(--text); }
+        .section-head::before { content: ''; position: absolute; left: 0; top: 2px; bottom: 2px; width: 3px; background: var(--gold); }
         .section-head .count { color: var(--text-dim); font-weight: 400; font-size: 12px; margin-left: 8px; }
-
-        .panel {
-            background: var(--panel);
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            padding: 18px 20px;
-        }
-
+        .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 18px 20px; }
         #tv_chart { border-radius: 4px; overflow: hidden; }
-
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-            gap: 1px;
-            background: var(--border);
-            border: 1px solid var(--border);
-            border-radius: 4px;
-            overflow: hidden;
-        }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
         .stat-box { background: var(--panel); padding: 16px 18px; text-align: center; }
         .stat-label { font-size: 11px; color: var(--text-dim); margin-bottom: 8px; }
         .stat-value { font-size: 22px; font-weight: 600; }
         .stat-value.pos { color: var(--long); }
         .stat-value.neg { color: var(--short); }
-
-        .signal-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-            gap: 12px;
-        }
-        .signal-card {
-            background: var(--panel);
-            border: 1px solid var(--border);
-            border-left: 3px solid var(--long);
-            border-radius: 3px;
-            padding: 14px 16px;
-        }
+        .signal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+        .signal-card { background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--long); border-radius: 3px; padding: 14px 16px; }
         .signal-card.short { border-left-color: var(--short); }
-        .sc-top {
-            display: flex;
-            align-items: baseline;
-            justify-content: space-between;
-            margin-bottom: 10px;
-        }
+        .sc-top { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; }
         .sc-symbol { font-size: 15px; font-weight: 600; }
         .sc-dir { font-size: 12px; font-weight: 600; }
         .sc-dir.long { color: var(--long); }
         .sc-dir.short { color: var(--short); }
         .sc-price { font-size: 20px; font-weight: 600; margin-bottom: 10px; }
-        .sc-row {
-            display: flex;
-            justify-content: space-between;
-            font-size: 12px;
-            color: var(--text-dim);
-            padding-top: 8px;
-            border-top: 1px solid var(--border);
-        }
+        .sc-row { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-dim); padding-top: 8px; border-top: 1px solid var(--border); }
         .sc-status { display: inline-flex; align-items: center; gap: 5px; }
         .status-dot { width: 6px; height: 6px; border-radius: 1px; background: var(--gold); }
         .status-dot.win { background: var(--long); }
         .status-dot.loss { background: var(--short); }
-
         .empty { color: var(--text-dim); padding: 24px 0; text-align: center; font-size: 13px; }
-
         table { width: 100%; border-collapse: collapse; }
         th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); font-size: 13px; }
         th { color: var(--text-dim); font-weight: 500; font-size: 11px; }
         .pos-text { color: var(--long); }
         .neg-text { color: var(--short); }
-
-        details.panel summary {
-            cursor: pointer;
-            list-style: none;
-            font-size: 13px;
-            color: var(--text-dim);
-            display: flex;
-            justify-content: space-between;
-        }
+        details.panel summary { cursor: pointer; list-style: none; font-size: 13px; color: var(--text-dim); display: flex; justify-content: space-between; }
         details.panel summary::-webkit-details-marker { display: none; }
         details.panel summary b { color: var(--text); }
         .symbol-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
-        .symbol-tag {
-            background: var(--panel-alt);
-            border: 1px solid var(--border);
-            color: var(--text-dim);
-            font-size: 11px;
-            padding: 4px 10px;
-            border-radius: 3px;
-        }
+        .symbol-tag { background: var(--panel-alt); border: 1px solid var(--border); color: var(--text-dim); font-size: 11px; padding: 4px 10px; border-radius: 3px; }
     </style>
 </head>
 <body>
     <header>
-        <h1>賽克斯訊號 · XUAN 3+1</h1>
-        <div class="sub">週期 {{ timeframe }}　訊號每60秒自動更新，圖表不受影響</div>
-    </header>
-
-    <!-- 圖表面板：固定不動，永遠不會被重整打斷 -->
-    <div class="panel">
-        <div id="tv_chart"></div>
-    </div>
-
-    <div class="section-head">整體績效<span class="count">僅計入已平倉訊號</span></div>
-    <div class="stats-grid" id="statsGrid">
-        <div class="stat-box"><div class="stat-label">已平倉訊號數</div><div class="stat-value mono" id="statTotal">-</div></div>
-        <div class="stat-box"><div class="stat-label">勝率</div><div class="stat-value mono" id="statWinRate">-</div></div>
-        <div class="stat-box"><div class="stat-label">總損益</div><div class="stat-value mono" id="statPnl">-</div></div>
-    </div>
-
-    <div class="section-head">未結單<span class="count" id="openCount">0 筆</span></div>
-    <div id="openSignalsBox"><div class="panel"><div class="empty">載入中...</div></div></div>
-
-    <div class="section-head">已結單<span class="count" id="closedCount">0 筆</span></div>
-    <div id="closedSignalsBox"><div class="panel"><div class="empty">載入中...</div></div></div>
-
-    <div class="section-head">分幣種績效</div>
-    <div class="panel" id="perSymbolBox"><div class="empty">載入中...</div></div>
-
-    <details class="panel" style="margin-top: 32px;">
-        <summary>
-            <span><b id="scanCountLabel">目前掃描中：- 個幣種</b>　點開查看清單</span>
-            <span id="scanUpdatedLabel"></span>
-        </summary>
-        <div class="symbol-tags" id="scanTagsBox"></div>
-    </details>
-
-    <script>
-        // ---- 圖表：只在頁面第一次載入時建立一次，之後的資料更新完全不會碰它 ----
-        new TradingView.widget({
-            "width": "100%",
-            "height": 460,
-            "symbol": "BINGX:BTCUSDT.P",
-            "interval": "60",
-            "timezone": "Asia/Taipei",
-            "theme": "dark",
-            "style": "1",
-            "locale": "zh_TW",
-            "toolbar_bg": "#121319",
-            "enable_publishing": false,
-            "hide_top_toolbar": false,
-            "allow_symbol_change": true,
-            "container_id": "tv_chart"
-        });
-
-        function escapeHtml(str) {
-            return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-        }
-
-        function signalCardHtml(s, isClosed) {
-            const dirClass = s.direction === 'short' ? 'short' : '';
-            const dirLabel = s.direction === 'long' ? '做多' : '做空';
-            let statusHtml;
-            if (isClosed) {
-                const win = s.status === 'tp_hit';
-                statusHtml = `<span class="status-dot ${win ? 'win' : 'loss'}"></span>${win ? '止盈' : '止損'}　${s.ago_str}`;
-            } else {
-                statusHtml = `<span class="status-dot"></span>追蹤中　${s.ago_str}`;
-            }
-            return `
-                <div class="signal-card ${dirClass}">
-                    <div class="sc-top">
-                        <span class="sc-symbol">${escapeHtml(s.base_symbol)}</span>
-                        <span class="sc-dir ${s.direction}">${dirLabel}</span>
-                    </div>
-                    <div class="sc-price mono">${s.entry_price}</div>
-                    <div class="sc-row">
-                        <span>SL ${s.sl_price}</span>
-                        <span class="sc-status">${statusHtml}</span>
-                    </div>
-                </div>`;
-        }
-
-        function renderSignalGroup(boxId, list, emptyText, isClosed) {
-            const box = document.getElementById(boxId);
-            if (!list.length) {
-                box.innerHTML = `<div class="panel"><div class="empty">${emptyText}</div></div>`;
-                return;
-            }
-            box.innerHTML = `<div class="signal-grid">${list.map(s => signalCardHtml(s, isClosed)).join('')}</div>`;
-        }
-
-        function renderPerSymbol(list) {
-            const box = document.getElementById('perSymbolBox');
-            if (!list.length) {
-                box.innerHTML = `<div class="empty">還沒有已平倉的訊號可以統計</div>`;
-                return;
-            }
-            const rows = list.map(row => `
-                <tr>
-                    <td>${escapeHtml(row.symbol)}</td>
-                    <td class="mono">${row.total}</td>
-                    <td class="mono ${row.win_rate >= 50 ? 'pos-text' : 'neg-text'}">${row.win_rate.toFixed(1)}%</td>
-                    <td class="mono ${row.pnl_pct >= 0 ? 'pos-text' : 'neg-text'}">${row.pnl_pct.toFixed(2)}%</td>
-                </tr>`).join('');
-            box.innerHTML = `
-                <table>
-                    <thead><tr><th>幣種</th><th>已平倉訊號數</th><th>勝率</th><th>累計損益</th></tr></thead>
-                    <tbody>${rows}</tbody>
-                </table>`;
-        }
-
-        function renderData(data) {
-            document.getElementById('statTotal').textContent = data.overall_stats.total;
-            const winRateEl = document.getElementById('statWinRate');
-            winRateEl.textContent = data.overall_stats.win_rate.toFixed(1) + '%';
-            winRateEl.className = 'stat-value mono ' + (data.overall_stats.win_rate >= 50 ? 'pos' : 'neg');
-            const pnlEl = document.getElementById('statPnl');
-            pnlEl.textContent = data.overall_stats.total_pnl_pct.toFixed(2) + '%';
-            pnlEl.className = 'stat-value mono ' + (data.overall_stats.total_pnl_pct >= 0 ? 'pos' : 'neg');
-
-            document.getElementById('openCount').textContent = data.open_signals.length + ' 筆';
-            document.getElementById('closedCount').textContent = data.closed_signals.length + ' 筆';
-            renderSignalGroup('openSignalsBox', data.open_signals, '目前沒有追蹤中的訊號', false);
-            renderSignalGroup('closedSignalsBox', data.closed_signals, '還沒有已結束的訊號', true);
-            renderPerSymbol(data.per_symbol_stats);
-
-            document.getElementById('scanCountLabel').textContent = `目前掃描中：${data.symbols_count} 個幣種`;
-            document.getElementById('scanUpdatedLabel').textContent = data.symbols_updated_str ? `更新於 ${data.symbols_updated_str}` : '';
-            const tagsBox = document.getElementById('scanTagsBox');
-            tagsBox.innerHTML = data.scan_symbols.length
-                ? data.scan_symbols.map(s => `<span class="symbol-tag">${escapeHtml(s)}</span>`).join('')
-                : `<div class="empty">名單還沒抓到，稍等下一輪掃描</div>`;
-        }
-
-        function fetchAndRender() {
-            fetch('/api/data')
-                .then(res => res.json())
-                .then(renderData)
-                .catch(err => console.error('資料更新失敗:', err));
-            
-        fetchAndRender();
-        setInterval(fetchAndRender, 60000);
-    </script>
-</body>
-</html>
-        
+        <h1>賽克斯訊號 · XUAN
