@@ -6,102 +6,171 @@
     <title>XUAN 3+1 BingX 訊號掃描</title>
     <meta http-equiv="refresh" content="60">
     <script src="https://s3.tradingview.com/tv.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
     <style>
         * { box-sizing: border-box; }
+        :root {
+            --bg: #0a0a0d;
+            --panel: #121319;
+            --panel-alt: #17181f;
+            --border: #24262e;
+            --gold: #b8902f;
+            --gold-bright: #e0b64f;
+            --text: #ecebe6;
+            --text-dim: #8b8d95;
+            --long: #35b37e;
+            --short: #e5484d;
+        }
         body {
-            font-family: -apple-system, "Segoe UI", "Microsoft JhengHei", sans-serif;
-            background: #0b0d12;
-            color: #e6e6e6;
+            font-family: 'IBM Plex Sans', -apple-system, "Microsoft JhengHei", sans-serif;
+            background: var(--bg);
+            color: var(--text);
             margin: 0;
-            padding: 24px 28px 60px;
+            padding: 28px 24px 60px;
         }
-        h1 { font-size: 20px; margin: 0 0 4px; letter-spacing: 0.3px; }
-        .sub { color: #767c88; font-size: 13px; margin-bottom: 24px; }
+        .mono { font-family: 'IBM Plex Mono', monospace; }
 
-        .card {
-            background: linear-gradient(180deg, #14161d 0%, #101218 100%);
-            border: 1px solid #21242e;
-            border-radius: 14px;
-            box-shadow: 0 4px 18px rgba(0,0,0,0.35);
-            padding: 20px 22px;
-            margin-bottom: 22px;
+        header { margin-bottom: 24px; }
+        h1 {
+            font-size: 19px;
+            font-weight: 600;
+            margin: 0 0 6px;
+            color: var(--gold-bright);
+            letter-spacing: 0.2px;
         }
-        .card-title {
-            font-size: 13px;
-            color: #8b91a0;
-            margin-bottom: 14px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
+        .sub { color: var(--text-dim); font-size: 13px; }
+
+        .section-head {
+            position: relative;
+            padding-left: 14px;
+            margin: 32px 0 14px;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text);
         }
-        .card-title b { color: #e6e6e6; font-size: 14px; }
+        .section-head::before {
+            content: '';
+            position: absolute;
+            left: 0; top: 2px; bottom: 2px;
+            width: 3px;
+            background: var(--gold);
+        }
+        .section-head .count { color: var(--text-dim); font-weight: 400; font-size: 12px; margin-left: 8px; }
+
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 18px 20px;
+        }
 
         /* ---- 圖表面板 ---- */
         select#symbolSelect {
-            background: #1a1d26;
-            color: #e6e6e6;
-            border: 1px solid #2a2e3a;
-            border-radius: 8px;
-            padding: 8px 12px;
+            background: var(--panel-alt);
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 7px 12px;
             font-size: 13px;
             margin-bottom: 14px;
             outline: none;
         }
-        #tv_chart { border-radius: 10px; overflow: hidden; }
+        #tv_chart { border-radius: 4px; overflow: hidden; }
 
-        /* ---- 統計卡片 ---- */
+        /* ---- 統計 ---- */
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 14px;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 1px;
+            background: var(--border);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            overflow: hidden;
         }
-        .stat-box {
-            background: #171a22;
-            border: 1px solid #262a35;
-            border-radius: 10px;
-            padding: 16px 18px;
-            text-align: center;
-        }
-        .stat-label { font-size: 12px; color: #8b91a0; margin-bottom: 8px; }
-        .stat-value { font-size: 24px; font-weight: 700; }
-        .stat-value.pos { color: #26a69a; }
-        .stat-value.neg { color: #ef5350; }
+        .stat-box { background: var(--panel); padding: 16px 18px; text-align: center; }
+        .stat-label { font-size: 11px; color: var(--text-dim); margin-bottom: 8px; }
+        .stat-value { font-size: 22px; font-weight: 600; }
+        .stat-value.pos { color: var(--long); }
+        .stat-value.neg { color: var(--short); }
 
-        /* ---- 表格共用 ---- */
+        /* ---- 訊號卡片 ---- */
+        .signal-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+            gap: 12px;
+        }
+        .signal-card {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-left: 3px solid var(--long);
+            border-radius: 3px;
+            padding: 14px 16px;
+        }
+        .signal-card.short { border-left-color: var(--short); }
+        .sc-top {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+        .sc-symbol { font-size: 15px; font-weight: 600; }
+        .sc-dir { font-size: 12px; font-weight: 600; }
+        .sc-dir.long { color: var(--long); }
+        .sc-dir.short { color: var(--short); }
+        .sc-price { font-size: 20px; font-weight: 600; margin-bottom: 10px; }
+        .sc-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            color: var(--text-dim);
+            padding-top: 8px;
+            border-top: 1px solid var(--border);
+        }
+        .sc-status { display: inline-flex; align-items: center; gap: 5px; }
+        .status-dot { width: 6px; height: 6px; border-radius: 1px; background: var(--gold); }
+        .status-dot.win { background: var(--long); }
+        .status-dot.loss { background: var(--short); }
+
+        .empty { color: var(--text-dim); padding: 24px 0; text-align: center; font-size: 13px; }
+
+        /* ---- 表格 ---- */
         table { width: 100%; border-collapse: collapse; }
-        th, td {
-            text-align: left;
-            padding: 10px 12px;
-            border-bottom: 1px solid #20232c;
-            font-size: 13px;
-        }
-        th { color: #8b91a0; font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px; }
-        tr:hover td { background: #14161d; }
-        .long { color: #26a69a; font-weight: 600; }
-        .short { color: #ef5350; font-weight: 600; }
-        .pos-text { color: #26a69a; }
-        .neg-text { color: #ef5350; }
-        .empty { color: #767c88; padding: 30px 0; text-align: center; }
+        th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); font-size: 13px; }
+        th { color: var(--text-dim); font-weight: 500; font-size: 11px; }
+        .pos-text { color: var(--long); }
+        .neg-text { color: var(--short); }
 
-        /* ---- 幣種標籤 ---- */
-        .symbol-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+        /* ---- 收合區塊 ---- */
+        details.panel summary {
+            cursor: pointer;
+            list-style: none;
+            font-size: 13px;
+            color: var(--text-dim);
+            display: flex;
+            justify-content: space-between;
+        }
+        details.panel summary::-webkit-details-marker { display: none; }
+        details.panel summary b { color: var(--text); }
+        .symbol-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
         .symbol-tag {
-            background: #1a1d26;
-            border: 1px solid #262a35;
-            color: #b7bcc7;
+            background: var(--panel-alt);
+            border: 1px solid var(--border);
+            color: var(--text-dim);
             font-size: 11px;
             padding: 4px 10px;
-            border-radius: 12px;
+            border-radius: 3px;
         }
     </style>
 </head>
 <body>
-    <h1>XUAN 3+1 BingX 訊號掃描</h1>
-    <div class="sub">週期: {{ timeframe }}　|　每60秒自動重整這個頁面</div>
+    <header>
+        <h1>賽克斯訊號 · XUAN 3+1</h1>
+        <div class="sub">週期 {{ timeframe }}　每60秒自動更新</div>
+    </header>
 
     <!-- 圖表面板 -->
-    <div class="card">
-        <div class="card-title"><b>即時圖表</b></div>
+    <div class="panel">
         <select id="symbolSelect" onchange="loadWidget(document.getElementById('symbolSelect').value)">
             {% for sym in scan_symbols %}
             <option value="{{ tv_symbol_map[sym] }}" {% if loop.first %}selected{% endif %}>{{ sym }}</option>
@@ -110,45 +179,85 @@
         <div id="tv_chart"></div>
     </div>
 
-    <!-- 勝率/損益統計 -->
-    <div class="card">
-        <div class="card-title"><b>整體績效</b>（僅計入已平倉訊號）</div>
-        <div class="stats-grid">
-            <div class="stat-box">
-                <div class="stat-label">已平倉訊號數</div>
-                <div class="stat-value">{{ overall_stats.total }}</div>
-            </div>
-            <div class="stat-box">
-                <div class="stat-label">勝率</div>
-                <div class="stat-value {{ 'pos' if overall_stats.win_rate >= 50 else 'neg' }}">{{ '%.1f' % overall_stats.win_rate }}%</div>
-            </div>
-            <div class="stat-box">
-                <div class="stat-label">總損益</div>
-                <div class="stat-value {{ 'pos' if overall_stats.total_pnl_pct >= 0 else 'neg' }}">{{ '%.2f' % overall_stats.total_pnl_pct }}%</div>
-            </div>
+    <!-- 整體績效 -->
+    <div class="section-head">整體績效<span class="count">僅計入已平倉訊號</span></div>
+    <div class="stats-grid">
+        <div class="stat-box">
+            <div class="stat-label">已平倉訊號數</div>
+            <div class="stat-value mono">{{ overall_stats.total }}</div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-label">勝率</div>
+            <div class="stat-value mono {{ 'pos' if overall_stats.win_rate >= 50 else 'neg' }}">{{ '%.1f' % overall_stats.win_rate }}%</div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-label">總損益</div>
+            <div class="stat-value mono {{ 'pos' if overall_stats.total_pnl_pct >= 0 else 'neg' }}">{{ '%.2f' % overall_stats.total_pnl_pct }}%</div>
         </div>
     </div>
 
+    <!-- 未結單 -->
+    <div class="section-head">未結單<span class="count">{{ open_signals|length }} 筆</span></div>
+    {% if open_signals %}
+    <div class="signal-grid">
+        {% for s in open_signals %}
+        <div class="signal-card {{ 'short' if s.direction == 'short' else '' }}">
+            <div class="sc-top">
+                <span class="sc-symbol">{{ s.symbol.split('/')[0] }}</span>
+                <span class="sc-dir {{ s.direction }}">{{ '做多' if s.direction == 'long' else '做空' }}</span>
+            </div>
+            <div class="sc-price mono">{{ s.entry_price }}</div>
+            <div class="sc-row">
+                <span>SL {{ s.sl_price }}</span>
+                <span class="sc-status"><span class="status-dot"></span>追蹤中　{{ s.ago_str }}</span>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="panel"><div class="empty">目前沒有追蹤中的訊號</div></div>
+    {% endif %}
+
+    <!-- 已結單 -->
+    <div class="section-head">已結單<span class="count">{{ closed_signals|length }} 筆</span></div>
+    {% if closed_signals %}
+    <div class="signal-grid">
+        {% for s in closed_signals %}
+        <div class="signal-card {{ 'short' if s.direction == 'short' else '' }}">
+            <div class="sc-top">
+                <span class="sc-symbol">{{ s.symbol.split('/')[0] }}</span>
+                <span class="sc-dir {{ s.direction }}">{{ '做多' if s.direction == 'long' else '做空' }}</span>
+            </div>
+            <div class="sc-price mono">{{ s.entry_price }}</div>
+            <div class="sc-row">
+                <span>SL {{ s.sl_price }}</span>
+                <span class="sc-status">
+                    <span class="status-dot {{ 'win' if s.status == 'tp_hit' else 'loss' }}"></span>
+                    {{ '止盈' if s.status == 'tp_hit' else '止損' }}　{{ s.ago_str }}
+                </span>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="panel"><div class="empty">還沒有已結束的訊號</div></div>
+    {% endif %}
+
     <!-- 分幣種績效 -->
-    <div class="card">
-        <div class="card-title"><b>分幣種績效</b></div>
+    <div class="section-head">分幣種績效</div>
+    <div class="panel">
         {% if per_symbol_stats %}
         <table>
             <thead>
-                <tr>
-                    <th>幣種</th>
-                    <th>已平倉訊號數</th>
-                    <th>勝率</th>
-                    <th>累計損益</th>
-                </tr>
+                <tr><th>幣種</th><th>已平倉訊號數</th><th>勝率</th><th>累計損益</th></tr>
             </thead>
             <tbody>
                 {% for row in per_symbol_stats %}
                 <tr>
                     <td>{{ row.symbol }}</td>
-                    <td>{{ row.total }}</td>
-                    <td class="{{ 'pos-text' if row.win_rate >= 50 else 'neg-text' }}">{{ '%.1f' % row.win_rate }}%</td>
-                    <td class="{{ 'pos-text' if row.pnl_pct >= 0 else 'neg-text' }}">{{ '%.2f' % row.pnl_pct }}%</td>
+                    <td class="mono">{{ row.total }}</td>
+                    <td class="mono {{ 'pos-text' if row.win_rate >= 50 else 'neg-text' }}">{{ '%.1f' % row.win_rate }}%</td>
+                    <td class="mono {{ 'pos-text' if row.pnl_pct >= 0 else 'neg-text' }}">{{ '%.2f' % row.pnl_pct }}%</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -158,12 +267,12 @@
         {% endif %}
     </div>
 
-    <!-- 目前掃描名單 -->
-    <div class="card">
-        <div class="card-title">
-            <b>目前掃描中：{{ symbols_count }} 個幣種</b>
-            <span style="font-weight:400;">{% if symbols_updated_str %}名單更新於 {{ symbols_updated_str }}{% endif %}</span>
-        </div>
+    <!-- 掃描名單 (收合) -->
+    <details class="panel" style="margin-top: 32px;">
+        <summary>
+            <span><b>目前掃描中：{{ symbols_count }} 個幣種</b>　點開查看清單</span>
+            <span>{% if symbols_updated_str %}更新於 {{ symbols_updated_str }}{% endif %}</span>
+        </summary>
         {% if scan_symbols %}
         <div class="symbol-tags">
             {% for sym in scan_symbols %}
@@ -173,56 +282,21 @@
         {% else %}
         <div class="empty">名單還沒抓到，稍等下一輪掃描</div>
         {% endif %}
-    </div>
-
-    <!-- 訊號歷史 -->
-    <div class="card">
-        <div class="card-title"><b>訊號歷史</b></div>
-        {% if signals %}
-        <table>
-            <thead>
-                <tr>
-                    <th>時間</th>
-                    <th>幣種</th>
-                    <th>方向</th>
-                    <th>進場價</th>
-                    <th>止損價</th>
-                    <th>止損距離</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for s in signals %}
-                <tr>
-                    <td>{{ s.time_str }}</td>
-                    <td>{{ s.symbol }}</td>
-                    <td class="{{ 'long' if s.direction == 'long' else 'short' }}">
-                        {{ '做多' if s.direction == 'long' else '做空' }}
-                    </td>
-                    <td>{{ s.entry_price }}</td>
-                    <td>{{ s.sl_price }}</td>
-                    <td>{{ '%.2f' % ((s.entry_price - s.sl_price) / s.entry_price * 100 if s.direction == 'long' else (s.sl_price - s.entry_price) / s.entry_price * 100) }}%</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-        {% else %}
-        <div class="empty">目前還沒有偵測到任何訊號</div>
-        {% endif %}
-    </div>
+    </details>
 
     <script>
         function loadWidget(symbol) {
             document.getElementById('tv_chart').innerHTML = '';
             new TradingView.widget({
                 "width": "100%",
-                "height": 480,
+                "height": 460,
                 "symbol": symbol,
                 "interval": "60",
                 "timezone": "Asia/Taipei",
                 "theme": "dark",
                 "style": "1",
                 "locale": "zh_TW",
-                "toolbar_bg": "#131722",
+                "toolbar_bg": "#121319",
                 "enable_publishing": false,
                 "hide_top_toolbar": false,
                 "container_id": "tv_chart"
@@ -230,9 +304,7 @@
         }
         window.onload = function() {
             var sel = document.getElementById('symbolSelect');
-            if (sel && sel.value) {
-                loadWidget(sel.value);
-            }
+            if (sel && sel.value) { loadWidget(sel.value); }
         };
     </script>
 </body>
