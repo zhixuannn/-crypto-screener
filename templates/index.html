@@ -285,4 +285,10 @@
                 .then(res => res.json())
                 .then(renderData)
                 .catch(err => console.error('資料更新失敗:', err));
+            
+        fetchAndRender();
+        setInterval(fetchAndRender, 60000);
+    </script>
+</body>
+</html>
         }
