@@ -39,6 +39,21 @@ STABLECOIN_SYMBOLS = {
 app = Flask(__name__)
 
 
+def time_ago_str(ms: int, now_ms: int) -> str:
+    """把毫秒時間戳轉成『幾分鐘前/幾小時前/幾天前』的字串。"""
+    delta_sec = max(0, (now_ms - ms) / 1000)
+    if delta_sec < 60:
+        return '剛剛'
+    minutes = int(delta_sec / 60)
+    if minutes < 60:
+        return f'{minutes}分鐘前'
+    hours = int(minutes / 60)
+    if hours < 24:
+        return f'{hours}小時前'
+    days = int(hours / 24)
+    return f'{days}天前'
+
+
 def build_bingx_symbol_map(exchange) -> dict:
     """把 BingX 永續合約清單，整理成 {幣種代號: 完整交易對格式} 的對照表。例如 {'BTC': 'BTC/USDT:USDT'}。"""
     perp_symbols = exchange_client.get_perpetual_symbols(exchange)
@@ -202,10 +217,15 @@ def scan_market():
 def index():
     import datetime
     signals = database.get_recent_signals(limit=100)
+    now_ms = int(time.time() * 1000)
     for s in signals:
         dt = datetime.datetime.fromtimestamp(s['candle_time'] / 1000, tz=datetime.timezone.utc)
         dt_local = dt.astimezone()
         s['time_str'] = dt_local.strftime('%Y-%m-%d %H:%M')
+        s['ago_str'] = time_ago_str(s['detected_at'], now_ms)
+
+    open_signals = [s for s in signals if s['status'] == 'open']
+    closed_signals = [s for s in signals if s['status'] != 'open']
 
     scan_symbols_raw, symbols_updated_at = database.get_scan_symbols_cached()
     scan_symbols = [s.split('/')[0] for s in scan_symbols_raw]
@@ -218,7 +238,8 @@ def index():
     overall_stats, per_symbol_stats = database.get_stats()
 
     return render_template(
-        'index.html', signals=signals, timeframe=TIMEFRAME,
+        'index.html', signals=signals, open_signals=open_signals, closed_signals=closed_signals,
+        timeframe=TIMEFRAME,
         scan_symbols=scan_symbols, symbols_count=len(scan_symbols),
         symbols_updated_str=symbols_updated_str, tv_symbol_map=tv_symbol_map,
         overall_stats=overall_stats, per_symbol_stats=per_symbol_stats
