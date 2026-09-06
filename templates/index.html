@@ -170,12 +170,7 @@
     </header>
 
     <!-- 圖表面板 -->
-    <div class="panel">
-        <select id="symbolSelect" onchange="loadWidget(document.getElementById('symbolSelect').value)">
-            {% for sym in scan_symbols %}
-           <option value="{{ tv_symbol_map[sym] }}" {% if sym == 'BTC' %}selected{% endif %}>{{ sym }}</option>
-            {% endfor %}
-        </select>
+        <div class="panel">
         <div id="tv_chart"></div>
     </div>
 
