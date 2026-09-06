@@ -4,7 +4,7 @@ XUAN 3+1 BingX 訊號掃描網站 (狀態持久化版)
 - 每 SCAN_INTERVAL_MINUTES 分鐘，讀取每個幣種上次存的策略狀態，
   只把「新出現的、已收盤」的K棒餵進去繼續運算，不再每次從頭重算
 - 有新訊號就存進資料庫，並發送 Telegram 通知
-- 網頁首頁顯示最近的訊號列表
+- 網頁首頁顯示最近的訊號列表，以及目前掃描中的幣種清單
 """
 
 import os
@@ -61,6 +61,7 @@ def get_scan_symbols() -> list:
         bingx_map[sym] for sym in cmc_symbols
         if sym in bingx_map and sym.upper() not in STABLECOIN_SYMBOLS
     ]
+    database.save_scan_symbols(scan_list, int(time.time() * 1000))
     return scan_list
 
 
@@ -84,7 +85,7 @@ def scan_one_symbol_stateful(symbol: str):
             state, _bootstrap_signals = strategy.advance_state(state, candles, rr=TP_RR)
             last_candle_time = candles[-1][0]
             logger.info(f'{symbol} 新幣種初始化完成，用了 {len(candles)} 根歷史K棒補記憶')
-            result_signals = []  # bootstrap階段的訊號只是補記憶用，不通知
+            result_signals = []
         else:
             state_json, last_candle_time = state_row
             state = strategy.state_from_json(state_json)
@@ -205,7 +206,19 @@ def index():
         dt = datetime.datetime.fromtimestamp(s['candle_time'] / 1000, tz=datetime.timezone.utc)
         dt_local = dt.astimezone()
         s['time_str'] = dt_local.strftime('%Y-%m-%d %H:%M')
-    return render_template('index.html', signals=signals, timeframe=TIMEFRAME)
+
+    scan_symbols_raw, symbols_updated_at = database.get_scan_symbols_cached()
+    scan_symbols = [s.split('/')[0] for s in scan_symbols_raw]
+    symbols_updated_str = None
+    if symbols_updated_at:
+        dt = datetime.datetime.fromtimestamp(symbols_updated_at / 1000, tz=datetime.timezone.utc)
+        symbols_updated_str = dt.astimezone().strftime('%Y-%m-%d %H:%M')
+
+    return render_template(
+        'index.html', signals=signals, timeframe=TIMEFRAME,
+        scan_symbols=scan_symbols, symbols_count=len(scan_symbols),
+        symbols_updated_str=symbols_updated_str
+    )
 
 
 @app.route('/chart/<path:symbol>')
