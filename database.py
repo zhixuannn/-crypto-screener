@@ -6,6 +6,7 @@ SQLite 資料庫模組。
 3. 儲存每個幣種的「策略運算狀態」，讓掃描從「每次全部重算」
    改成「讀取上次狀態→只算新K棒→存回狀態」
 4. 儲存「目前掃描中的幣種清單」，讓網頁可以顯示
+5. 提供勝率/損益統計 (總體 + 分幣種)
 """
 
 import sqlite3
@@ -188,3 +189,69 @@ def get_scan_symbols_cached():
         if row is None:
             return [], None
         return json.loads(row['symbols_json']), row['updated_at']
+
+
+def get_stats():
+    """
+    計算勝率/損益統計 (只看已平倉的訊號，status 是 tp_hit 或 sl_hit)。
+    回傳 (overall, per_symbol_list)：
+      overall: {'total': int, 'win_rate': float, 'total_pnl_pct': float}
+      per_symbol_list: [{'symbol': str, 'total': int, 'win_rate': float, 'pnl_pct': float}, ...]，依損益由高到低排序
+    """
+    with _lock:
+        conn = get_connection()
+        rows = conn.execute(
+            "SELECT * FROM signals WHERE status IN ('tp_hit', 'sl_hit')"
+        ).fetchall()
+        conn.close()
+
+    if not rows:
+        return {'total': 0, 'win_rate': 0.0, 'total_pnl_pct': 0.0}, []
+
+    by_symbol = {}
+    total_pnl = 0.0
+    wins = 0
+
+    for r in rows:
+        entry = r['entry_price']
+        direction = r['direction']
+        is_win = r['status'] == 'tp_hit'
+        exit_price = r['tp_price'] if is_win else r['sl_price']
+
+        if exit_price is None:
+            continue
+
+        if direction == 'long':
+            pnl_pct = (exit_price - entry) / entry * 100
+        else:
+            pnl_pct = (entry - exit_price) / entry * 100
+
+        total_pnl += pnl_pct
+        if is_win:
+            wins += 1
+
+        sym = r['symbol']
+        if sym not in by_symbol:
+            by_symbol[sym] = {'total': 0, 'wins': 0, 'pnl': 0.0}
+        by_symbol[sym]['total'] += 1
+        by_symbol[sym]['wins'] += 1 if is_win else 0
+        by_symbol[sym]['pnl'] += pnl_pct
+
+    total = len(rows)
+    overall = {
+        'total': total,
+        'win_rate': (wins / total * 100) if total else 0.0,
+        'total_pnl_pct': total_pnl,
+    }
+
+    per_symbol = []
+    for sym, d in by_symbol.items():
+        per_symbol.append({
+            'symbol': sym.split('/')[0],
+            'total': d['total'],
+            'win_rate': (d['wins'] / d['total'] * 100) if d['total'] else 0.0,
+            'pnl_pct': d['pnl'],
+        })
+    per_symbol.sort(key=lambda x: x['pnl_pct'], reverse=True)
+
+    return overall, per_symbol
