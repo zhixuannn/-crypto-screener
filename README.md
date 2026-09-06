@@ -1,4 +1,4 @@
-# XUAN 3+1 BingX 訊號掃描網站
+# XUAN  訊號掃描網站
 
 自動掃描 BingX 上所有 USDT 永續合約，用 XUAN 3+1 邏輯 (CHoCH + FVG + BOS + 訂單塊)
 判斷進場訊號，有新訊號就存進資料庫、並發送 Telegram 通知。
