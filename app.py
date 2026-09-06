@@ -209,15 +209,19 @@ def index():
 
     scan_symbols_raw, symbols_updated_at = database.get_scan_symbols_cached()
     scan_symbols = [s.split('/')[0] for s in scan_symbols_raw]
+    tv_symbol_map = {s.split('/')[0]: database.symbol_to_tradingview(s) for s in scan_symbols_raw}
     symbols_updated_str = None
     if symbols_updated_at:
         dt = datetime.datetime.fromtimestamp(symbols_updated_at / 1000, tz=datetime.timezone.utc)
         symbols_updated_str = dt.astimezone().strftime('%Y-%m-%d %H:%M')
 
+    overall_stats, per_symbol_stats = database.get_stats()
+
     return render_template(
         'index.html', signals=signals, timeframe=TIMEFRAME,
         scan_symbols=scan_symbols, symbols_count=len(scan_symbols),
-        symbols_updated_str=symbols_updated_str
+        symbols_updated_str=symbols_updated_str, tv_symbol_map=tv_symbol_map,
+        overall_stats=overall_stats, per_symbol_stats=per_symbol_stats
     )
 
 
