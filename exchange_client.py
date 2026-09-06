@@ -47,3 +47,36 @@ def fetch_closed_candles(exchange, symbol: str, timeframe: str = '5m', limit: in
         raw = raw[:-1]
 
     return raw
+
+
+
+
+def fetch_new_closed_candles(exchange, symbol: str, timeframe: str = '5m', since_ms: int = None, limit: int = 1000) -> list:
+    """
+    抓取『從 since_ms 之後』新出現、且已經收盤的K棒(不含 since_ms 那一根本身，避免重複)。
+    如果 since_ms 是 None，等同呼叫 fetch_closed_candles()。
+    如果中間漏接很久，會自動分批一路抓到追上最新為止。
+    """
+    if since_ms is None:
+        return fetch_closed_candles(exchange, symbol, timeframe, limit)
+
+    all_new = []
+    timeframe_ms = exchange.parse_timeframe(timeframe) * 1000
+    fetch_since = since_ms + 1
+    now_ms = int(time.time() * 1000)
+
+    while True:
+        raw = exchange.fetch_ohlcv(symbol, timeframe=timeframe, since=fetch_since, limit=limit)
+        if not raw:
+            break
+        last_candle = raw[-1]
+        if last_candle[0] + timeframe_ms > now_ms:
+            raw = raw[:-1]
+        if not raw:
+            break
+        all_new.extend(raw)
+        fetch_since = raw[-1][0] + 1
+        if len(raw) < limit:
+            break
+
+    return all_new
