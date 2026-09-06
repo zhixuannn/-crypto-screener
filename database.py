@@ -3,15 +3,14 @@ SQLite 資料庫模組。
 用途：
 1. 儲存偵測到的訊號歷史，讓網頁可以顯示
 2. 記錄「這根K棒 + 這個幣 + 這個方向」是否已經處理過，避免重複發Telegram通知
-   (正常情況下策略本身不會重複觸發同一根K棒的訊號，這裡是多一層保險，
-    防止伺服器重啟、掃描時間重疊等意外狀況造成重複通知)
-3. 【新增】儲存每個幣種的「策略運算狀態」，讓掃描從「每次全部重算」
-   改成「讀取上次狀態→只算新K棒→存回狀態」，避免因為視窗長度有限
-   導致跟 Pine Script 版本(擁有完整歷史記憶)判斷不一致的問題
+3. 儲存每個幣種的「策略運算狀態」，讓掃描從「每次全部重算」
+   改成「讀取上次狀態→只算新K棒→存回狀態」
+4. 儲存「目前掃描中的幣種清單」，讓網頁可以顯示
 """
 
 import sqlite3
 import os
+import json
 import threading
 
 DB_PATH = os.environ.get('DATABASE_PATH', 'signals.db')
@@ -42,7 +41,6 @@ def init_db():
                 UNIQUE(symbol, direction, candle_time)
             )
         ''')
-        # ---- 針對「舊版資料庫」做欄位遷移：如果表格是舊版建立的、缺欄位，這裡補上 ----
         for col_name, col_type in [
             ('tp_price', 'REAL'),
             ('status', "TEXT NOT NULL DEFAULT 'open'"),
@@ -51,14 +49,21 @@ def init_db():
             try:
                 conn.execute(f'ALTER TABLE signals ADD COLUMN {col_name} {col_type}')
             except sqlite3.OperationalError:
-                pass  # 欄位已經存在，忽略
+                pass
 
-        # ---- 【新增】每個幣種的策略運算狀態 ----
         conn.execute('''
             CREATE TABLE IF NOT EXISTS symbol_state (
                 symbol TEXT PRIMARY KEY,
                 state_json TEXT NOT NULL,
                 last_candle_time INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )
+        ''')
+
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS scan_state (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                symbols_json TEXT NOT NULL,
                 updated_at INTEGER NOT NULL
             )
         ''')
@@ -89,13 +94,12 @@ def record_signal(symbol: str, direction: str, entry_price: float, sl_price: flo
             )
             conn.commit()
         except sqlite3.IntegrityError:
-            pass  # 已經存在，忽略 (跟signal_already_recorded互相保護，避免race condition)
+            pass
         finally:
             conn.close()
 
 
 def get_open_signals() -> list:
-    """取得所有『還沒結束(還沒碰到止盈或止損)』的訊號，用於後續追蹤。"""
     with _lock:
         conn = get_connection()
         rows = conn.execute(
@@ -106,7 +110,6 @@ def get_open_signals() -> list:
 
 
 def close_signal(signal_id: int, status: str, closed_at: int):
-    """把某筆訊號標記為結束 (status = 'tp_hit' 或 'sl_hit')。"""
     with _lock:
         conn = get_connection()
         conn.execute(
@@ -128,19 +131,12 @@ def get_recent_signals(limit: int = 100) -> list:
 
 
 def symbol_to_tradingview(symbol: str) -> str:
-    """
-    把 ccxt 的交易對格式 (例如 'BTC/USDT:USDT') 轉成 TradingView 嵌入圖表用的代碼
-    (例如 'BINGX:BTCUSDT.P')。
-    """
-    base_quote = symbol.split(':')[0]        # 'BTC/USDT'
-    compact = base_quote.replace('/', '')     # 'BTCUSDT'
+    base_quote = symbol.split(':')[0]
+    compact = base_quote.replace('/', '')
     return f'BINGX:{compact}.P'
 
 
-# ==================== 【新增】幣種策略狀態 ====================
-
 def get_symbol_state(symbol: str):
-    """讀取某個幣種目前存的策略狀態。回傳 (state_json_str, last_candle_time) 或 None (代表還沒有狀態，是新幣種)。"""
     with _lock:
         conn = get_connection()
         row = conn.execute(
@@ -154,7 +150,6 @@ def get_symbol_state(symbol: str):
 
 
 def save_symbol_state(symbol: str, state_json: str, last_candle_time: int, updated_at: int):
-    """把某個幣種最新的策略狀態存回去 (不存在就新增，存在就覆蓋)。"""
     with _lock:
         conn = get_connection()
         conn.execute('''
@@ -167,3 +162,29 @@ def save_symbol_state(symbol: str, state_json: str, last_candle_time: int, updat
         ''', (symbol, state_json, last_candle_time, updated_at))
         conn.commit()
         conn.close()
+
+
+def save_scan_symbols(symbols: list, updated_at: int):
+    """把這次掃描實際使用的幣種清單存起來 (只留一筆，每次覆蓋)。"""
+    with _lock:
+        conn = get_connection()
+        conn.execute('''
+            INSERT INTO scan_state (id, symbols_json, updated_at)
+            VALUES (1, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                symbols_json = excluded.symbols_json,
+                updated_at = excluded.updated_at
+        ''', (json.dumps(symbols), updated_at))
+        conn.commit()
+        conn.close()
+
+
+def get_scan_symbols_cached():
+    """讀取目前存的掃描名單。回傳 (symbols_list, updated_at)，還沒有資料時回傳 ([], None)。"""
+    with _lock:
+        conn = get_connection()
+        row = conn.execute('SELECT symbols_json, updated_at FROM scan_state WHERE id = 1').fetchone()
+        conn.close()
+        if row is None:
+            return [], None
+        return json.loads(row['symbols_json']), row['updated_at']
