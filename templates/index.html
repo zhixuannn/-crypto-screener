@@ -72,4 +72,160 @@
 </head>
 <body>
     <header>
-        <h1>賽克斯訊號 · XUAN
+        <h1>賽克斯訊號 · XUAN 3+1</h1>
+        <div class="sub">週期 {{ timeframe }}　訊號每60秒自動更新，圖表不受影響</div>
+    </header>
+
+    <div class="panel">
+        <div id="tv_chart"></div>
+    </div>
+
+    <div class="section-head">整體績效<span class="count">僅計入已平倉訊號</span></div>
+    <div class="stats-grid" id="statsGrid">
+        <div class="stat-box"><div class="stat-label">已平倉訊號數</div><div class="stat-value mono" id="statTotal">-</div></div>
+        <div class="stat-box"><div class="stat-label">勝率</div><div class="stat-value mono" id="statWinRate">-</div></div>
+        <div class="stat-box"><div class="stat-label">總損益</div><div class="stat-value mono" id="statPnl">-</div></div>
+    </div>
+
+    <div class="section-head">未結單<span class="count" id="openCount">0 筆</span></div>
+    <div id="openSignalsBox"><div class="panel"><div class="empty">載入中...</div></div></div>
+
+    <div class="section-head">已結單<span class="count" id="closedCount">0 筆</span></div>
+    <div id="closedSignalsBox"><div class="panel"><div class="empty">載入中...</div></div></div>
+
+    <div class="section-head">分幣種績效</div>
+    <div class="panel" id="perSymbolBox"><div class="empty">載入中...</div></div>
+
+    <details class="panel" style="margin-top: 32px;">
+        <summary>
+            <span><b id="scanCountLabel">目前掃描中：- 個幣種</b>　點開查看清單</span>
+            <span id="scanUpdatedLabel"></span>
+        </summary>
+        <div class="symbol-tags" id="scanTagsBox"></div>
+    </details>
+
+    <script>
+        new TradingView.widget({
+            "width": "100%",
+            "height": 460,
+            "symbol": "BINGX:BTCUSDT.P",
+            "interval": "60",
+            "timezone": "Asia/Taipei",
+            "theme": "dark",
+            "style": "1",
+            "locale": "zh_TW",
+            "toolbar_bg": "#121319",
+            "enable_publishing": false,
+            "hide_top_toolbar": false,
+            "allow_symbol_change": true,
+            "container_id": "tv_chart"
+        });
+
+        function escapeHtml(str) {
+            return String(str).replace(/[&<>"']/g, function(c) {
+                var map = {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'};
+                return map[c];
+            });
+        }
+
+        function signalCardHtml(s, isClosed) {
+            var dirClass = s.direction === 'short' ? 'short' : '';
+            var dirLabel = s.direction === 'long' ? '做多' : '做空';
+            var statusHtml;
+            if (isClosed) {
+                var win = s.status === 'tp_hit';
+                statusHtml = '<span class="status-dot ' + (win ? 'win' : 'loss') + '"></span>' + (win ? '止盈' : '止損') + '　' + s.ago_str;
+            } else {
+                statusHtml = '<span class="status-dot"></span>追蹤中　' + s.ago_str;
+            }
+            return '<div class="signal-card ' + dirClass + '">' +
+                        '<div class="sc-top">' +
+                            '<span class="sc-symbol">' + escapeHtml(s.base_symbol) + '</span>' +
+                            '<span class="sc-dir ' + s.direction + '">' + dirLabel + '</span>' +
+                        '</div>' +
+                        '<div class="sc-price mono">' + s.entry_price + '</div>' +
+                        '<div class="sc-row">' +
+                            '<span>SL ' + s.sl_price + '</span>' +
+                            '<span class="sc-status">' + statusHtml + '</span>' +
+                        '</div>' +
+                    '</div>';
+        }
+
+        function renderSignalGroup(boxId, list, emptyText, isClosed) {
+            var box = document.getElementById(boxId);
+            if (!list.length) {
+                box.innerHTML = '<div class="panel"><div class="empty">' + emptyText + '</div></div>';
+                return;
+            }
+            var html = '<div class="signal-grid">';
+            for (var i = 0; i < list.length; i++) {
+                html += signalCardHtml(list[i], isClosed);
+            }
+            html += '</div>';
+            box.innerHTML = html;
+        }
+
+        function renderPerSymbol(list) {
+            var box = document.getElementById('perSymbolBox');
+            if (!list.length) {
+                box.innerHTML = '<div class="empty">還沒有已平倉的訊號可以統計</div>';
+                return;
+            }
+            var rows = '';
+            for (var i = 0; i < list.length; i++) {
+                var row = list[i];
+                rows += '<tr>' +
+                            '<td>' + escapeHtml(row.symbol) + '</td>' +
+                            '<td class="mono">' + row.total + '</td>' +
+                            '<td class="mono ' + (row.win_rate >= 50 ? 'pos-text' : 'neg-text') + '">' + row.win_rate.toFixed(1) + '%</td>' +
+                            '<td class="mono ' + (row.pnl_pct >= 0 ? 'pos-text' : 'neg-text') + '">' + row.pnl_pct.toFixed(2) + '%</td>' +
+                        '</tr>';
+            }
+            box.innerHTML = '<table><thead><tr><th>幣種</th><th>已平倉訊號數</th><th>勝率</th><th>累計損益</th></tr></thead><tbody>' + rows + '</tbody></table>';
+        }
+
+        function renderData(data) {
+            document.getElementById('statTotal').textContent = data.overall_stats.total;
+
+            var winRateEl = document.getElementById('statWinRate');
+            winRateEl.textContent = data.overall_stats.win_rate.toFixed(1) + '%';
+            winRateEl.className = 'stat-value mono ' + (data.overall_stats.win_rate >= 50 ? 'pos' : 'neg');
+
+            var pnlEl = document.getElementById('statPnl');
+            pnlEl.textContent = data.overall_stats.total_pnl_pct.toFixed(2) + '%';
+            pnlEl.className = 'stat-value mono ' + (data.overall_stats.total_pnl_pct >= 0 ? 'pos' : 'neg');
+
+            document.getElementById('openCount').textContent = data.open_signals.length + ' 筆';
+            document.getElementById('closedCount').textContent = data.closed_signals.length + ' 筆';
+
+            renderSignalGroup('openSignalsBox', data.open_signals, '目前沒有追蹤中的訊號', false);
+            renderSignalGroup('closedSignalsBox', data.closed_signals, '還沒有已結束的訊號', true);
+            renderPerSymbol(data.per_symbol_stats);
+
+            document.getElementById('scanCountLabel').textContent = '目前掃描中：' + data.symbols_count + ' 個幣種';
+            document.getElementById('scanUpdatedLabel').textContent = data.symbols_updated_str ? ('更新於 ' + data.symbols_updated_str) : '';
+
+            var tagsBox = document.getElementById('scanTagsBox');
+            if (data.scan_symbols.length) {
+                var tagsHtml = '';
+                for (var i = 0; i < data.scan_symbols.length; i++) {
+                    tagsHtml += '<span class="symbol-tag">' + escapeHtml(data.scan_symbols[i]) + '</span>';
+                }
+                tagsBox.innerHTML = tagsHtml;
+            } else {
+                tagsBox.innerHTML = '<div class="empty">名單還沒抓到，稍等下一輪掃描</div>';
+            }
+        }
+
+        function fetchAndRender() {
+            fetch('/api/data')
+                .then(function(res) { return res.json(); })
+                .then(renderData)
+                .catch(function(err) { console.error('資料更新失敗:', err); });
+        }
+
+        fetchAndRender();
+        setInterval(fetchAndRender, 60000);
+    </script>
+</body>
+</html>
