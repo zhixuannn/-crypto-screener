@@ -1,12 +1,5 @@
 """
 XUAN 3+1 BingX 訊號掃描網站 (狀態持久化版)
-- 幣種範圍：CoinMarketCap 市值前100大 ∩ BingX 有永續合約的幣種，排除穩定幣
-- 每 SCAN_INTERVAL_MINUTES 分鐘，讀取每個幣種上次存的策略狀態，
-  只把「新出現的、已收盤」的K棒餵進去繼續運算，不再每次從頭重算
-- 有新訊號就存進資料庫，並發送 Telegram 通知
-- 網頁首頁顯示最近的訊號列表，以及目前掃描中的幣種清單
-- /api/data 提供 JSON 格式的最新資料，讓前端用背景輪詢方式更新畫面，
-  不需要整頁重新整理 (圖表區塊才不會被打斷)
 """
 
 import os
@@ -15,7 +8,7 @@ import datetime
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from flask import Flask, render_template, jsonify
+from flask import Flask, render_template, jsonify, request
 from apscheduler.schedulers.background import BackgroundScheduler
 
 import database
@@ -39,11 +32,12 @@ STABLECOIN_SYMBOLS = {
     'USDP', 'FDUSD', 'PYUSD', 'USDE', 'FRAX', 'GUSD'
 }
 
+TW_TZ = datetime.timezone(datetime.timedelta(hours=8))
+
 app = Flask(__name__)
 
 
 def time_ago_str(ms: int, now_ms: int) -> str:
-    """把毫秒時間戳轉成『幾分鐘前/幾小時前/幾天前』的字串。"""
     delta_sec = max(0, (now_ms - ms) / 1000)
     if delta_sec < 60:
         return '剛剛'
@@ -58,7 +52,6 @@ def time_ago_str(ms: int, now_ms: int) -> str:
 
 
 def build_bingx_symbol_map(exchange) -> dict:
-    """把 BingX 永續合約清單，整理成 {幣種代號: 完整交易對格式} 的對照表。例如 {'BTC': 'BTC/USDT:USDT'}。"""
     perp_symbols = exchange_client.get_perpetual_symbols(exchange)
     mapping = {}
     for s in perp_symbols:
@@ -68,7 +61,6 @@ def build_bingx_symbol_map(exchange) -> dict:
 
 
 def get_scan_symbols() -> list:
-    """回傳這次要掃描的完整幣種清單 (CMC前100大 ∩ BingX有上架的，排除穩定幣)。"""
     exchange = exchange_client.get_exchange()
     cmc_symbols = cmc_client.get_top100_symbols()
     if not cmc_symbols:
@@ -84,10 +76,6 @@ def get_scan_symbols() -> list:
 
 
 def scan_one_symbol_stateful(symbol: str):
-    """
-    對單一幣種：讀狀態→抓新K棒(或bootstrap歷史)→更新狀態→存回去。
-    回傳 (symbol, list[Signal])。新幣種bootstrap階段一律回傳空list(不通知)。
-    """
     try:
         exchange = exchange_client.get_exchange()
         state_row = database.get_symbol_state(symbol)
@@ -125,7 +113,6 @@ def scan_one_symbol_stateful(symbol: str):
 
 
 def check_open_signal(row: dict):
-    """檢查單一筆『還沒結束』的訊號，最新K棒有沒有碰到止盈或止損。"""
     symbol = row['symbol']
     try:
         exchange = exchange_client.get_exchange()
@@ -162,7 +149,6 @@ def check_open_signal(row: dict):
 
 
 def check_open_signals():
-    """檢查所有『還沒結束』的訊號，這個函式會在每次掃描時先執行。"""
     open_signals = database.get_open_signals()
     if not open_signals:
         return
@@ -172,7 +158,6 @@ def check_open_signals():
 
 
 def scan_market():
-    """掃描整個市場，這個函式會被排程器定期呼叫。"""
     start_time = time.time()
     logger.info('開始掃描市場...')
 
@@ -216,9 +201,36 @@ def scan_market():
     logger.info(f'掃描完成，耗時 {elapsed:.1f} 秒，共 {found_count} 個新訊號')
 
 
-def build_dashboard_data() -> dict:
-    """整理首頁需要的所有資料，index()跟/api/data共用同一份邏輯，避免兩邊寫法對不起來。"""
-    signals = database.get_recent_signals(limit=100)
+def resolve_time_range(args):
+    range_param = args.get('range', 'today')
+    now = datetime.datetime.now(tz=TW_TZ)
+    now_ms = int(now.timestamp() * 1000)
+
+    if range_param == 'today':
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        return int(start.timestamp() * 1000), now_ms
+    if range_param == '7d':
+        return now_ms - 7 * 24 * 3600 * 1000, now_ms
+    if range_param == '30d':
+        return now_ms - 30 * 24 * 3600 * 1000, now_ms
+    if range_param == 'custom':
+        start_str = args.get('start')
+        end_str = args.get('end')
+        start_ms = end_ms = None
+        if start_str:
+            start_dt = datetime.datetime.strptime(start_str, '%Y-%m-%d').replace(tzinfo=TW_TZ)
+            start_ms = int(start_dt.timestamp() * 1000)
+        if end_str:
+            end_dt = datetime.datetime.strptime(end_str, '%Y-%m-%d').replace(
+                hour=23, minute=59, second=59, microsecond=999000, tzinfo=TW_TZ
+            )
+            end_ms = int(end_dt.timestamp() * 1000)
+        return start_ms, end_ms
+    return None, None
+
+
+def build_dashboard_data(start_ms=None, end_ms=None) -> dict:
+    signals = database.get_recent_signals(limit=200)
     now_ms = int(time.time() * 1000)
     for s in signals:
         dt = datetime.datetime.fromtimestamp(s['candle_time'] / 1000, tz=datetime.timezone.utc)
@@ -230,19 +242,40 @@ def build_dashboard_data() -> dict:
     open_signals = [s for s in signals if s['status'] == 'open']
     closed_signals = [s for s in signals if s['status'] != 'open']
 
+    if open_signals:
+        try:
+            exchange = exchange_client.get_exchange()
+            open_symbols = list({s['symbol'] for s in open_signals})
+            last_prices = exchange_client.get_last_prices(exchange, open_symbols)
+        except Exception as e:
+            logger.warning(f'抓取即時價格失敗: {e}')
+            last_prices = {}
+        for s in open_signals:
+            last_price = last_prices.get(s['symbol'])
+            if last_price is not None:
+                entry = s['entry_price']
+                if s['direction'] == 'long':
+                    s['live_pct'] = (last_price - entry) / entry * 100
+                else:
+                    s['live_pct'] = (entry - last_price) / entry * 100
+            else:
+                s['live_pct'] = None
+
     scan_symbols_raw, symbols_updated_at = database.get_scan_symbols_cached()
     scan_symbols = [s.split('/')[0] for s in scan_symbols_raw]
+    tv_symbol_map = {s.split('/')[0]: database.symbol_to_tradingview(s) for s in scan_symbols_raw}
     symbols_updated_str = None
     if symbols_updated_at:
         dt = datetime.datetime.fromtimestamp(symbols_updated_at / 1000, tz=datetime.timezone.utc)
         symbols_updated_str = dt.astimezone().strftime('%Y-%m-%d %H:%M')
 
-    overall_stats, per_symbol_stats = database.get_stats()
+    overall_stats, per_symbol_stats = database.get_stats(start_ms, end_ms)
 
     return {
         'open_signals': open_signals,
         'closed_signals': closed_signals,
         'scan_symbols': scan_symbols,
+        'tv_symbol_map': tv_symbol_map,
         'symbols_count': len(scan_symbols),
         'symbols_updated_str': symbols_updated_str,
         'overall_stats': overall_stats,
@@ -258,7 +291,8 @@ def index():
 
 @app.route('/api/data')
 def api_data():
-    return jsonify(build_dashboard_data())
+    start_ms, end_ms = resolve_time_range(request.args)
+    return jsonify(build_dashboard_data(start_ms, end_ms))
 
 
 @app.route('/chart/<path:symbol>')
