@@ -46,6 +46,7 @@
         .section-head .count { color: var(--text-dim); font-weight: 400; font-size: 12px; margin-left: 8px; }
         .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 18px 20px; }
         #tv_chart { border-radius: 4px; overflow: hidden; }
+        #chartPanel { scroll-margin-top: 20px; }
 
         .filter-input { background: var(--panel-alt); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 7px 12px; font-size: 13px; outline: none; width: 200px; }
         .filter-input::placeholder { color: var(--text-dim); }
@@ -67,7 +68,8 @@
         .signal-card { background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--long); border-radius: 3px; padding: 14px 16px; }
         .signal-card.short { border-left-color: var(--short); }
         .sc-top { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 12px; }
-        .sc-symbol { font-size: 15px; font-weight: 600; }
+        .sc-symbol { font-size: 15px; font-weight: 600; cursor: pointer; }
+        .sc-symbol:hover { color: var(--gold-bright); }
         .sc-dir { font-size: 12px; font-weight: 600; }
         .sc-dir.long { color: var(--long); }
         .sc-dir.short { color: var(--short); }
@@ -93,7 +95,8 @@
         .closed-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
         .closed-card { background: var(--panel); border: 1px solid var(--border); border-radius: 3px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
         .cc-left { display: flex; align-items: center; gap: 8px; }
-        .cc-symbol { font-size: 13px; font-weight: 600; }
+        .cc-symbol { font-size: 13px; font-weight: 600; cursor: pointer; }
+        .cc-symbol:hover { color: var(--gold-bright); }
         .cc-dir { font-size: 11px; }
         .cc-dir.long { color: var(--long); }
         .cc-dir.short { color: var(--short); }
@@ -128,7 +131,7 @@
 
     <div class="main">
         <div id="pageOverview">
-            <div class="panel">
+            <div class="panel" id="chartPanel">
                 <div id="tv_chart"></div>
             </div>
 
@@ -211,6 +214,18 @@
         }
         loadWidget('BINGX:BTCUSDT.P');
 
+        function symbolToTv(fullSymbol) {
+            var base = fullSymbol.split('/')[0];
+            return 'BINGX:' + base + 'USDT.P';
+        }
+
+        function jumpToChart(fullSymbol) {
+            loadWidget(symbolToTv(fullSymbol));
+            var page = document.querySelector('.nav-item[data-page="overview"]');
+            if (page && !page.classList.contains('active')) page.click();
+            document.getElementById('chartPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
         function escapeHtml(str) {
             return String(str).replace(/[&<>"']/g, function(c) {
                 var map = {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'};
@@ -243,7 +258,7 @@
             }
             return '<div class="signal-card ' + dirClass + '">' +
                         '<div class="sc-top">' +
-                            '<span class="sc-symbol">' + escapeHtml(s.base_symbol) + '</span>' +
+                            '<span class="sc-symbol" data-symbol="' + escapeHtml(s.symbol) + '">' + escapeHtml(s.base_symbol) + '</span>' +
                             '<span class="sc-dir ' + s.direction + '">' + dirLabel + '</span>' +
                         '</div>' +
                         '<div class="price-boxes">' +
@@ -266,7 +281,7 @@
             return '<div class="closed-card">' +
                         '<div class="cc-left">' +
                             '<span class="status-dot ' + (win ? 'win' : 'loss') + '"></span>' +
-                            '<span class="cc-symbol">' + escapeHtml(s.base_symbol) + '</span>' +
+                            '<span class="cc-symbol" data-symbol="' + escapeHtml(s.symbol) + '">' + escapeHtml(s.base_symbol) + '</span>' +
                             '<span class="cc-dir ' + dirClass + '">' + dirLabel + '</span>' +
                         '</div>' +
                         '<div class="cc-right">' +
@@ -274,6 +289,15 @@
                             '<div class="cc-time">' + s.ago_str + '</div>' +
                         '</div>' +
                     '</div>';
+        }
+
+        function bindSymbolClicks(container) {
+            var els = container.querySelectorAll('[data-symbol]');
+            for (var i = 0; i < els.length; i++) {
+                els[i].addEventListener('click', function() {
+                    jumpToChart(this.getAttribute('data-symbol'));
+                });
+            }
         }
 
         function renderOpenSignals(list) {
@@ -287,6 +311,7 @@
             for (var i = 0; i < list.length; i++) html += openCardHtml(list[i]);
             html += '</div>';
             box.innerHTML = html;
+            bindSymbolClicks(box);
         }
 
         function renderClosedSignals(list) {
@@ -300,6 +325,7 @@
             for (var i = 0; i < list.length; i++) html += closedCardHtml(list[i]);
             html += '</div>';
             box.innerHTML = html;
+            bindSymbolClicks(box);
         }
 
         function applySymbolFilter() {
@@ -361,7 +387,10 @@
                 for (var j = 0; j < tagEls.length; j++) {
                     tagEls[j].addEventListener('click', function() {
                         var tv = this.getAttribute('data-tv');
-                        if (tv) loadWidget(tv);
+                        if (tv) {
+                            loadWidget(tv);
+                            document.getElementById('chartPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        }
                     });
                 }
             } else {
