@@ -31,41 +31,10 @@
         }
         .mono { font-family: 'IBM Plex Mono', monospace; }
 
-        /* ---- 左側選單 ---- */
-        .sidebar {
-            width: 168px;
-            flex-shrink: 0;
-            background: var(--panel);
-            border-right: 1px solid var(--border);
-            padding: 22px 14px;
-        }
-        .sidebar h1 {
-            font-size: 15px;
-            font-weight: 600;
-            color: var(--gold-bright);
-            margin: 0 0 4px;
-            padding: 0 8px;
-        }
-        .sidebar .sub {
-            color: var(--text-dim);
-            font-size: 11px;
-            margin: 0 0 20px;
-            padding: 0 8px;
-        }
-        .nav-item {
-            display: block;
-            width: 100%;
-            text-align: left;
-            background: none;
-            border: none;
-            color: var(--text-dim);
-            font-size: 13px;
-            font-family: inherit;
-            padding: 9px 10px;
-            border-radius: 4px;
-            cursor: pointer;
-            margin-bottom: 2px;
-        }
+        .sidebar { width: 168px; flex-shrink: 0; background: var(--panel); border-right: 1px solid var(--border); padding: 22px 14px; }
+        .sidebar h1 { font-size: 15px; font-weight: 600; color: var(--gold-bright); margin: 0 0 4px; padding: 0 8px; }
+        .sidebar .sub { color: var(--text-dim); font-size: 11px; margin: 0 0 20px; padding: 0 8px; }
+        .nav-item { display: block; width: 100%; text-align: left; background: none; border: none; color: var(--text-dim); font-size: 13px; font-family: inherit; padding: 9px 10px; border-radius: 4px; cursor: pointer; margin-bottom: 2px; }
         .nav-item.active { color: var(--gold-bright); background: var(--panel-alt); }
         .nav-item:hover:not(.active) { color: var(--text); }
 
@@ -78,10 +47,7 @@
         .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 18px 20px; }
         #tv_chart { border-radius: 4px; overflow: hidden; }
 
-        .filter-input {
-            background: var(--panel-alt); color: var(--text); border: 1px solid var(--border);
-            border-radius: 4px; padding: 7px 12px; font-size: 13px; outline: none; width: 200px;
-        }
+        .filter-input { background: var(--panel-alt); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 7px 12px; font-size: 13px; outline: none; width: 200px; }
         .filter-input::placeholder { color: var(--text-dim); }
 
         .range-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -124,7 +90,6 @@
         .status-dot.win { background: var(--long); }
         .status-dot.loss { background: var(--short); }
 
-        /* ---- 已結單簡化卡片 ---- */
         .closed-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
         .closed-card { background: var(--panel); border: 1px solid var(--border); border-radius: 3px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
         .cc-left { display: flex; align-items: center; gap: 8px; }
@@ -149,10 +114,7 @@
         details.panel summary::-webkit-details-marker { display: none; }
         details.panel summary b { color: var(--text); }
         .symbol-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
-        .symbol-tag {
-            background: var(--panel-alt); border: 1px solid var(--border); color: var(--text-dim);
-            font-size: 11px; padding: 4px 10px; border-radius: 3px; cursor: pointer;
-        }
+        .symbol-tag { background: var(--panel-alt); border: 1px solid var(--border); color: var(--text-dim); font-size: 11px; padding: 4px 10px; border-radius: 3px; cursor: pointer; }
         .symbol-tag:hover { color: var(--gold-bright); border-color: var(--gold); }
     </style>
 </head>
@@ -165,7 +127,6 @@
     </div>
 
     <div class="main">
-        <!-- ================= 總覽頁 ================= -->
         <div id="pageOverview">
             <div class="panel">
                 <div id="tv_chart"></div>
@@ -191,7 +152,6 @@
             </details>
         </div>
 
-        <!-- ================= 統計頁 ================= -->
         <div id="pageStats" style="display: none;">
             <div class="section-head">
                 整體績效<span class="count">僅計入已平倉訊號</span>
@@ -220,7 +180,6 @@
         var currentRange = 'today';
         var lastData = null;
 
-        // ---- 選單切換 ----
         var navItems = document.querySelectorAll('.nav-item');
         for (var n = 0; n < navItems.length; n++) {
             navItems[n].addEventListener('click', function() {
@@ -232,7 +191,6 @@
             });
         }
 
-        // ---- 圖表：只建立一次，之後只用 loadWidget 切換 symbol ----
         function loadWidget(tvSymbol) {
             document.getElementById('tv_chart').innerHTML = '';
             new TradingView.widget({
@@ -260,12 +218,23 @@
             });
         }
 
+        function formatPrice(price) {
+            if (price == null) return '-';
+            var num = Number(price);
+            if (isNaN(num)) return price;
+            var decimals;
+            if (num >= 100) decimals = 2;
+            else if (num >= 1) decimals = 4;
+            else if (num >= 0.01) decimals = 6;
+            else decimals = 8;
+            var fixed = num.toFixed(decimals);
+            return parseFloat(fixed).toString();
+        }
+
         function openCardHtml(s) {
             var dirClass = s.direction === 'short' ? 'short' : '';
             var dirLabel = s.direction === 'long' ? '做多' : '做空';
-            var tpHtml = s.tp_price != null
-                ? '<div class="price-box tp"><div class="pb-label">TP</div><div class="pb-value mono">' + s.tp_price + '</div></div>'
-                : '<div class="price-box"><div class="pb-label">TP</div><div class="pb-value mono">-</div></div>';
+            var tpHtml = '<div class="price-box tp"><div class="pb-label">TP</div><div class="pb-value mono">' + formatPrice(s.tp_price) + '</div></div>';
             var liveHtml = '';
             if (s.live_pct != null) {
                 var liveClass = s.live_pct >= 0 ? 'pos' : 'neg';
@@ -278,8 +247,8 @@
                             '<span class="sc-dir ' + s.direction + '">' + dirLabel + '</span>' +
                         '</div>' +
                         '<div class="price-boxes">' +
-                            '<div class="price-box entry"><div class="pb-label">進場</div><div class="pb-value mono">' + s.entry_price + '</div></div>' +
-                            '<div class="price-box sl"><div class="pb-label">SL</div><div class="pb-value mono">' + s.sl_price + '</div></div>' +
+                            '<div class="price-box entry"><div class="pb-label">進場</div><div class="pb-value mono">' + formatPrice(s.entry_price) + '</div></div>' +
+                            '<div class="price-box sl"><div class="pb-label">SL</div><div class="pb-value mono">' + formatPrice(s.sl_price) + '</div></div>' +
                             tpHtml +
                         '</div>' +
                         liveHtml +
