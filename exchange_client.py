@@ -80,3 +80,27 @@ def fetch_new_closed_candles(exchange, symbol: str, timeframe: str = '5m', since
             break
 
     return all_new
+
+
+
+
+def get_last_prices(exchange, symbols: list) -> dict:
+    """
+    一次抓一批交易對的最新成交價，回傳 {symbol: last_price}。
+    用 fetch_tickers 一次要多個，比逐一呼叫快很多。
+    """
+    if not symbols:
+        return {}
+    try:
+        tickers = exchange.fetch_tickers(symbols)
+    except Exception:
+        try:
+            tickers = exchange.fetch_tickers()
+        except Exception:
+            return {}
+    result = {}
+    for sym, t in tickers.items():
+        last = t.get('last')
+        if last is not None:
+            result[sym] = last
+    return result
