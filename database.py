@@ -1,12 +1,5 @@
 """
 SQLite 資料庫模組。
-用途：
-1. 儲存偵測到的訊號歷史，讓網頁可以顯示
-2. 記錄「這根K棒 + 這個幣 + 這個方向」是否已經處理過，避免重複發Telegram通知
-3. 儲存每個幣種的「策略運算狀態」，讓掃描從「每次全部重算」
-   改成「讀取上次狀態→只算新K棒→存回狀態」
-4. 儲存「目前掃描中的幣種清單」，讓網頁可以顯示
-5. 提供勝率/損益統計 (總體 + 分幣種)
 """
 
 import sqlite3
@@ -166,7 +159,6 @@ def save_symbol_state(symbol: str, state_json: str, last_candle_time: int, updat
 
 
 def save_scan_symbols(symbols: list, updated_at: int):
-    """把這次掃描實際使用的幣種清單存起來 (只留一筆，每次覆蓋)。"""
     with _lock:
         conn = get_connection()
         conn.execute('''
@@ -181,7 +173,6 @@ def save_scan_symbols(symbols: list, updated_at: int):
 
 
 def get_scan_symbols_cached():
-    """讀取目前存的掃描名單。回傳 (symbols_list, updated_at)，還沒有資料時回傳 ([], None)。"""
     with _lock:
         conn = get_connection()
         row = conn.execute('SELECT symbols_json, updated_at FROM scan_state WHERE id = 1').fetchone()
@@ -191,57 +182,67 @@ def get_scan_symbols_cached():
         return json.loads(row['symbols_json']), row['updated_at']
 
 
-def get_stats():
-    """
-    計算勝率/損益統計 (只看已平倉的訊號，status 是 tp_hit 或 sl_hit)。
-    回傳 (overall, per_symbol_list)：
-      overall: {'total': int, 'win_rate': float, 'total_pnl_pct': float}
-      per_symbol_list: [{'symbol': str, 'total': int, 'win_rate': float, 'pnl_pct': float}, ...]，依損益由高到低排序
-    """
+def _row_r_multiple(r) -> float:
+    entry = r['entry_price']
+    sl = r['sl_price']
+    tp = r['tp_price']
+    direction = r['direction']
+    is_win = r['status'] == 'tp_hit'
+    exit_price = tp if is_win else sl
+    if exit_price is None:
+        return 0.0
+    if direction == 'long':
+        risk = entry - sl
+        reward = exit_price - entry
+    else:
+        risk = sl - entry
+        reward = entry - exit_price
+    if risk == 0:
+        return 0.0
+    return reward / risk
+
+
+def get_stats(start_ms: int = None, end_ms: int = None):
+    query = "SELECT * FROM signals WHERE status IN ('tp_hit', 'sl_hit')"
+    params = []
+    if start_ms is not None:
+        query += " AND detected_at >= ?"
+        params.append(start_ms)
+    if end_ms is not None:
+        query += " AND detected_at <= ?"
+        params.append(end_ms)
+
     with _lock:
         conn = get_connection()
-        rows = conn.execute(
-            "SELECT * FROM signals WHERE status IN ('tp_hit', 'sl_hit')"
-        ).fetchall()
+        rows = conn.execute(query, params).fetchall()
         conn.close()
 
     if not rows:
-        return {'total': 0, 'win_rate': 0.0, 'total_pnl_pct': 0.0}, []
+        return {'total': 0, 'win_rate': 0.0, 'total_r': 0.0}, []
 
     by_symbol = {}
-    total_pnl = 0.0
+    total_r = 0.0
     wins = 0
 
     for r in rows:
-        entry = r['entry_price']
-        direction = r['direction']
+        r_mult = _row_r_multiple(r)
         is_win = r['status'] == 'tp_hit'
-        exit_price = r['tp_price'] if is_win else r['sl_price']
-
-        if exit_price is None:
-            continue
-
-        if direction == 'long':
-            pnl_pct = (exit_price - entry) / entry * 100
-        else:
-            pnl_pct = (entry - exit_price) / entry * 100
-
-        total_pnl += pnl_pct
+        total_r += r_mult
         if is_win:
             wins += 1
 
         sym = r['symbol']
         if sym not in by_symbol:
-            by_symbol[sym] = {'total': 0, 'wins': 0, 'pnl': 0.0}
+            by_symbol[sym] = {'total': 0, 'wins': 0, 'r': 0.0}
         by_symbol[sym]['total'] += 1
         by_symbol[sym]['wins'] += 1 if is_win else 0
-        by_symbol[sym]['pnl'] += pnl_pct
+        by_symbol[sym]['r'] += r_mult
 
     total = len(rows)
     overall = {
         'total': total,
         'win_rate': (wins / total * 100) if total else 0.0,
-        'total_pnl_pct': total_pnl,
+        'total_r': total_r,
     }
 
     per_symbol = []
@@ -250,8 +251,8 @@ def get_stats():
             'symbol': sym.split('/')[0],
             'total': d['total'],
             'win_rate': (d['wins'] / d['total'] * 100) if d['total'] else 0.0,
-            'pnl_pct': d['pnl'],
+            'r': d['r'],
         })
-    per_symbol.sort(key=lambda x: x['pnl_pct'], reverse=True)
+    per_symbol.sort(key=lambda x: x['r'], reverse=True)
 
     return overall, per_symbol
