@@ -31,14 +31,24 @@
         }
         .mono { font-family: 'IBM Plex Mono', monospace; }
 
-        .sidebar { width: 168px; flex-shrink: 0; background: var(--panel); border-right: 1px solid var(--border); padding: 22px 14px; }
+        .sidebar { width: 168px; flex-shrink: 0; background: var(--panel); border-right: 1px solid var(--border); padding: 22px 14px; transition: width 0.2s, padding 0.2s; overflow: hidden; }
+        .sidebar.collapsed { width: 0; padding: 22px 0; border-right: none; }
+        .sidebar-inner { width: 140px; }
         .sidebar h1 { font-size: 15px; font-weight: 600; color: var(--gold-bright); margin: 0 0 4px; padding: 0 8px; }
         .sidebar .sub { color: var(--text-dim); font-size: 11px; margin: 0 0 20px; padding: 0 8px; }
         .nav-item { display: block; width: 100%; text-align: left; background: none; border: none; color: var(--text-dim); font-size: 13px; font-family: inherit; padding: 9px 10px; border-radius: 4px; cursor: pointer; margin-bottom: 2px; }
         .nav-item.active { color: var(--gold-bright); background: var(--panel-alt); }
         .nav-item:hover:not(.active) { color: var(--text); }
 
-        .main { flex: 1; padding: 28px 24px 60px; min-width: 0; }
+        .main { flex: 1; padding: 28px 24px 60px; min-width: 0; position: relative; }
+
+        .sidebar-toggle {
+            position: sticky; top: 0;
+            background: var(--panel); border: 1px solid var(--border); color: var(--text-dim);
+            border-radius: 4px; padding: 6px 9px; cursor: pointer; font-size: 13px;
+            margin-bottom: 16px; display: inline-block;
+        }
+        .sidebar-toggle:hover { color: var(--gold-bright); border-color: var(--gold); }
 
         .section-head { position: relative; padding-left: 14px; margin: 32px 0 14px; font-size: 14px; font-weight: 600; color: var(--text); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
         .section-head:first-child { margin-top: 0; }
@@ -128,14 +138,18 @@
     </style>
 </head>
 <body>
-    <div class="sidebar">
-        <h1>XUAN 3+1</h1>
-        <div class="sub">週期 {{ timeframe }}</div>
-        <button class="nav-item active" data-page="overview">總覽</button>
-        <button class="nav-item" data-page="stats">統計</button>
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-inner">
+            <h1>XUAN 3+1</h1>
+            <div class="sub">週期 {{ timeframe }}</div>
+            <button class="nav-item active" data-page="overview">總覽</button>
+            <button class="nav-item" data-page="stats">統計</button>
+        </div>
     </div>
 
     <div class="main">
+        <button class="sidebar-toggle" id="sidebarToggle">☰</button>
+
         <div id="pageOverview">
             <div class="panel" id="chartPanel">
                 <div id="tv_chart"></div>
@@ -189,6 +203,15 @@
         var currentRange = 'today';
         var lastData = null;
         var knownOpenSignalIds = null;
+
+        document.getElementById('sidebarToggle').addEventListener('click', function() {
+            var sb = document.getElementById('sidebar');
+            sb.classList.toggle('collapsed');
+            localStorage.setItem('sidebarCollapsed', sb.classList.contains('collapsed') ? '1' : '0');
+        });
+        if (localStorage.getItem('sidebarCollapsed') === '1') {
+            document.getElementById('sidebar').classList.add('collapsed');
+        }
 
         var navItems = document.querySelectorAll('.nav-item');
         for (var n = 0; n < navItems.length; n++) {
