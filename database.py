@@ -39,6 +39,8 @@ def init_db():
             ('tp_price', 'REAL'),
             ('status', "TEXT NOT NULL DEFAULT 'open'"),
             ('closed_at', 'INTEGER'),
+            ('strategy', "TEXT NOT NULL DEFAULT 'xuan'"),
+            ('timeframe', 'TEXT'),
         ]:
             try:
                 conn.execute(f'ALTER TABLE signals ADD COLUMN {col_name} {col_type}')
@@ -66,25 +68,26 @@ def init_db():
         conn.close()
 
 
-def signal_already_recorded(symbol: str, direction: str, candle_time: int) -> bool:
+def signal_already_recorded(symbol: str, direction: str, candle_time: int, strategy: str = 'xuan', timeframe: str = None) -> bool:
     with _lock:
         conn = get_connection()
         row = conn.execute(
-            'SELECT 1 FROM signals WHERE symbol = ? AND direction = ? AND candle_time = ?',
-            (symbol, direction, candle_time)
+            'SELECT 1 FROM signals WHERE symbol = ? AND direction = ? AND candle_time = ? AND strategy = ? AND (timeframe = ? OR (timeframe IS NULL AND ? IS NULL))',
+            (symbol, direction, candle_time, strategy, timeframe, timeframe)
         ).fetchone()
         conn.close()
         return row is not None
 
 
-def record_signal(symbol: str, direction: str, entry_price: float, sl_price: float, tp_price: float, candle_time: int, detected_at: int):
+def record_signal(symbol: str, direction: str, entry_price: float, sl_price: float, tp_price: float,
+                   candle_time: int, detected_at: int, strategy: str = 'xuan', timeframe: str = None):
     with _lock:
         conn = get_connection()
         try:
             conn.execute(
-                'INSERT INTO signals (symbol, direction, entry_price, sl_price, tp_price, candle_time, detected_at, status) '
-                'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-                (symbol, direction, entry_price, sl_price, tp_price, candle_time, detected_at, 'open')
+                'INSERT INTO signals (symbol, direction, entry_price, sl_price, tp_price, candle_time, detected_at, status, strategy, timeframe) '
+                'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                (symbol, direction, entry_price, sl_price, tp_price, candle_time, detected_at, 'open', strategy, timeframe)
             )
             conn.commit()
         except sqlite3.IntegrityError:
@@ -114,12 +117,17 @@ def close_signal(signal_id: int, status: str, closed_at: int):
         conn.close()
 
 
-def get_recent_signals(limit: int = 100) -> list:
+def get_recent_signals(limit: int = 100, strategy: str = None) -> list:
     with _lock:
         conn = get_connection()
-        rows = conn.execute(
-            'SELECT * FROM signals ORDER BY detected_at DESC LIMIT ?', (limit,)
-        ).fetchall()
+        if strategy:
+            rows = conn.execute(
+                'SELECT * FROM signals WHERE strategy = ? ORDER BY detected_at DESC LIMIT ?', (strategy, limit)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                'SELECT * FROM signals ORDER BY detected_at DESC LIMIT ?', (limit,)
+            ).fetchall()
         conn.close()
         return [dict(row) for row in rows]
 
@@ -131,6 +139,7 @@ def symbol_to_tradingview(symbol: str) -> str:
 
 
 def get_symbol_state(symbol: str):
+    """symbol 這個字串可以是複合鍵，例如 'BTC/USDT:USDT::sykes::15m'，用來讓不同策略/週期各自獨立存狀態。"""
     with _lock:
         conn = get_connection()
         row = conn.execute(
@@ -202,9 +211,18 @@ def _row_r_multiple(r) -> float:
     return reward / risk
 
 
-def get_stats(start_ms: int = None, end_ms: int = None):
+def get_stats(start_ms: int = None, end_ms: int = None, strategy: str = None):
+    """
+    計算勝率/R數統計 (只看已平倉訊號)，可選時間範圍與策略篩選。
+    回傳 (overall, per_symbol_list)：
+      overall: {'total': int, 'win_rate': float, 'total_r': float}
+      per_symbol_list: [{'symbol': str, 'total': int, 'win_rate': float, 'r': float}, ...]，依R數由高到低排序
+    """
     query = "SELECT * FROM signals WHERE status IN ('tp_hit', 'sl_hit')"
     params = []
+    if strategy:
+        query += " AND strategy = ?"
+        params.append(strategy)
     if start_ms is not None:
         query += " AND detected_at >= ?"
         params.append(start_ms)
