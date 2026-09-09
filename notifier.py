@@ -28,13 +28,14 @@ def send_telegram_message(text: str) -> bool:
         return False
 
 
-def format_signal_message(symbol: str, direction: str, entry_price: float, sl_price: float, tp_price: float, timeframe: str) -> str:
+def format_signal_message(symbol: str, direction: str, entry_price: float, sl_price: float, tp_price: float,
+                           timeframe: str, strategy_label: str = 'XUAN 3+1') -> str:
     direction_text = '📈 做多 (Long)' if direction == 'long' else '📉 做空 (Short)'
     risk = abs(entry_price - sl_price)
     risk_pct = (risk / entry_price) * 100 if entry_price else 0
     tp_line = f'止盈價: {tp_price:.6g}\n' if tp_price is not None else ''
     return (
-        f'<b>XUAN 3+1 進場訊號</b>\n'
+        f'<b>{strategy_label} 進場訊號</b>\n'
         f'幣種: <b>{symbol}</b>\n'
         f'週期: {timeframe}\n'
         f'方向: {direction_text}\n'
@@ -45,7 +46,8 @@ def format_signal_message(symbol: str, direction: str, entry_price: float, sl_pr
     )
 
 
-def format_close_message(symbol: str, direction: str, status: str, entry_price: float, exit_price: float) -> str:
+def format_close_message(symbol: str, direction: str, status: str, entry_price: float, exit_price: float,
+                          strategy_label: str = 'XUAN 3+1') -> str:
     direction_text = '做多 (Long)' if direction == 'long' else '做空 (Short)'
     is_win = status == 'tp_hit'
     result_text = '✅ 止盈' if is_win else '❌ 止損'
@@ -54,7 +56,7 @@ def format_close_message(symbol: str, direction: str, status: str, entry_price: 
     else:
         pnl_pct = (entry_price - exit_price) / entry_price * 100
     return (
-        f'<b>XUAN 3+1 平倉通知</b>\n'
+        f'<b>{strategy_label} 平倉通知</b>\n'
         f'幣種: <b>{symbol}</b>\n'
         f'方向: {direction_text}\n'
         f'結果: {result_text}\n'
