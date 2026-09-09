@@ -68,8 +68,14 @@
         .signal-card { background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--long); border-radius: 3px; padding: 14px 16px; }
         .signal-card.short { border-left-color: var(--short); }
         .sc-top { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 12px; }
+        .sc-name-group { display: flex; align-items: center; gap: 6px; }
         .sc-symbol { font-size: 15px; font-weight: 600; cursor: pointer; }
         .sc-symbol:hover { color: var(--gold-bright); }
+        .tv-btn {
+            font-size: 10px; font-weight: 600; color: var(--text-dim);
+            border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; cursor: pointer;
+        }
+        .tv-btn:hover { color: var(--gold-bright); border-color: var(--gold); }
         .sc-dir { font-size: 12px; font-weight: 600; }
         .sc-dir.long { color: var(--long); }
         .sc-dir.short { color: var(--short); }
@@ -92,9 +98,9 @@
         .status-dot.win { background: var(--long); }
         .status-dot.loss { background: var(--short); }
 
-        .closed-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+        .closed-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
         .closed-card { background: var(--panel); border: 1px solid var(--border); border-radius: 3px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-        .cc-left { display: flex; align-items: center; gap: 8px; }
+        .cc-left { display: flex; align-items: center; gap: 6px; }
         .cc-symbol { font-size: 13px; font-weight: 600; cursor: pointer; }
         .cc-symbol:hover { color: var(--gold-bright); }
         .cc-dir { font-size: 11px; }
@@ -182,6 +188,7 @@
     <script>
         var currentRange = 'today';
         var lastData = null;
+        var knownOpenSignalIds = null;
 
         var navItems = document.querySelectorAll('.nav-item');
         for (var n = 0; n < navItems.length; n++) {
@@ -246,6 +253,39 @@
             return parseFloat(fixed).toString();
         }
 
+        function requestNotifyPermission() {
+            if ('Notification' in window && Notification.permission === 'default') {
+                Notification.requestPermission();
+            }
+        }
+        requestNotifyPermission();
+
+        function notifyNewSignals(openSignals) {
+            if (!('Notification' in window) || Notification.permission !== 'granted') return;
+            var currentIds = {};
+            for (var i = 0; i < openSignals.length; i++) currentIds[openSignals[i].id] = true;
+
+            if (knownOpenSignalIds !== null) {
+                for (var i = 0; i < openSignals.length; i++) {
+                    var s = openSignals[i];
+                    if (!knownOpenSignalIds[s.id]) {
+                        var dirLabel = s.direction === 'long' ? '做多' : '做空';
+                        try {
+                            new Notification('新訊號: ' + s.base_symbol, {
+                                body: dirLabel + ' @ ' + s.entry_price,
+                                tag: 'signal-' + s.id
+                            });
+                        } catch (e) { console.error('通知發送失敗', e); }
+                    }
+                }
+            }
+            knownOpenSignalIds = currentIds;
+        }
+
+        function tvButtonHtml(fullSymbol) {
+            return '<span class="tv-btn" data-symbol="' + escapeHtml(fullSymbol) + '">TV</span>';
+        }
+
         function openCardHtml(s) {
             var dirClass = s.direction === 'short' ? 'short' : '';
             var dirLabel = s.direction === 'long' ? '做多' : '做空';
@@ -258,7 +298,10 @@
             }
             return '<div class="signal-card ' + dirClass + '">' +
                         '<div class="sc-top">' +
-                            '<span class="sc-symbol" data-symbol="' + escapeHtml(s.symbol) + '">' + escapeHtml(s.base_symbol) + '</span>' +
+                            '<div class="sc-name-group">' +
+                                '<span class="sc-symbol" data-symbol="' + escapeHtml(s.symbol) + '">' + escapeHtml(s.base_symbol) + '</span>' +
+                                tvButtonHtml(s.symbol) +
+                            '</div>' +
                             '<span class="sc-dir ' + s.direction + '">' + dirLabel + '</span>' +
                         '</div>' +
                         '<div class="price-boxes">' +
@@ -282,6 +325,7 @@
                         '<div class="cc-left">' +
                             '<span class="status-dot ' + (win ? 'win' : 'loss') + '"></span>' +
                             '<span class="cc-symbol" data-symbol="' + escapeHtml(s.symbol) + '">' + escapeHtml(s.base_symbol) + '</span>' +
+                            tvButtonHtml(s.symbol) +
                             '<span class="cc-dir ' + dirClass + '">' + dirLabel + '</span>' +
                         '</div>' +
                         '<div class="cc-right">' +
@@ -415,6 +459,7 @@
                 .then(function(res) { return res.json(); })
                 .then(function(data) {
                     lastData = data;
+                    notifyNewSignals(data.open_signals);
                     applySymbolFilter();
                     renderStats(data.overall_stats, data.per_symbol_stats);
                     renderScanList(data);
