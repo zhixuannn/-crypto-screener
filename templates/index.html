@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>XUAN 3+1 訊號掃描</title>
+    <title>訊號掃描</title>
     <script src="https://s3.tradingview.com/tv.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
@@ -50,6 +50,13 @@
         }
         .sidebar-toggle:hover { color: var(--gold-bright); border-color: var(--gold); }
 
+        .strategy-tabs { display: flex; gap: 8px; margin-bottom: 20px; }
+        .strategy-tab {
+            background: var(--panel-alt); color: var(--text-dim); border: 1px solid var(--border);
+            border-radius: 4px; padding: 7px 16px; font-size: 13px; cursor: pointer;
+        }
+        .strategy-tab.active { color: var(--gold-bright); border-color: var(--gold); background: var(--panel); }
+
         .section-head { position: relative; padding-left: 14px; margin: 32px 0 14px; font-size: 14px; font-weight: 600; color: var(--text); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
         .section-head:first-child { margin-top: 0; }
         .section-head::before { content: ''; position: absolute; left: 0; top: 2px; bottom: 2px; width: 3px; background: var(--gold); }
@@ -81,6 +88,7 @@
         .sc-name-group { display: flex; align-items: center; gap: 6px; }
         .sc-symbol { font-size: 15px; font-weight: 600; cursor: pointer; }
         .sc-symbol:hover { color: var(--gold-bright); }
+        .sc-tf { font-size: 10px; color: var(--text-dim); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; }
         .tv-btn {
             font-size: 10px; font-weight: 600; color: var(--text-dim);
             border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; cursor: pointer;
@@ -140,7 +148,7 @@
 <body>
     <div class="sidebar" id="sidebar">
         <div class="sidebar-inner">
-            <h1>XUAN 3+1</h1>
+            <h1>訊號掃描</h1>
             <div class="sub">週期 {{ timeframe }}</div>
             <button class="nav-item active" data-page="overview">總覽</button>
             <button class="nav-item" data-page="stats">統計</button>
@@ -155,16 +163,31 @@
                 <div id="tv_chart"></div>
             </div>
 
+            <div class="strategy-tabs">
+                <button class="strategy-tab active" data-strategy="xuan">XUAN 3+1</button>
+                <button class="strategy-tab" data-strategy="sykes">賽克斯</button>
+            </div>
+
             <div class="section-head">
                 訊號
                 <input type="text" class="filter-input" id="symbolFilter" placeholder="搜尋幣種，例如 BTC">
             </div>
 
-            <div class="section-head" style="margin-top: 20px;">未結單<span class="count" id="openCount">0 筆</span></div>
-            <div id="openSignalsBox"><div class="panel"><div class="empty">載入中...</div></div></div>
+            <div id="strategyOverview_xuan">
+                <div class="section-head" style="margin-top: 20px;">未結單<span class="count" id="xuan_openCount">0 筆</span></div>
+                <div id="xuan_openSignalsBox"><div class="panel"><div class="empty">載入中...</div></div></div>
 
-            <div class="section-head">已結單<span class="count" id="closedCount">0 筆</span></div>
-            <div id="closedSignalsBox"><div class="panel"><div class="empty">載入中...</div></div></div>
+                <div class="section-head">已結單<span class="count" id="xuan_closedCount">0 筆</span></div>
+                <div id="xuan_closedSignalsBox"><div class="panel"><div class="empty">載入中...</div></div></div>
+            </div>
+
+            <div id="strategyOverview_sykes" style="display: none;">
+                <div class="section-head" style="margin-top: 20px;">未結單<span class="count" id="sykes_openCount">0 筆</span></div>
+                <div id="sykes_openSignalsBox"><div class="panel"><div class="empty">載入中...</div></div></div>
+
+                <div class="section-head">已結單<span class="count" id="sykes_closedCount">0 筆</span></div>
+                <div id="sykes_closedSignalsBox"><div class="panel"><div class="empty">載入中...</div></div></div>
+            </div>
 
             <details class="panel" style="margin-top: 32px;">
                 <summary>
@@ -176,6 +199,11 @@
         </div>
 
         <div id="pageStats" style="display: none;">
+            <div class="strategy-tabs">
+                <button class="strategy-tab active" data-strategy="xuan">XUAN 3+1</button>
+                <button class="strategy-tab" data-strategy="sykes">賽克斯</button>
+            </div>
+
             <div class="section-head">
                 整體績效<span class="count">僅計入已平倉訊號</span>
                 <div class="range-bar" id="rangeBar">
@@ -201,6 +229,7 @@
 
     <script>
         var currentRange = 'today';
+        var currentStrategy = 'xuan';
         var lastData = null;
         var knownOpenSignalIds = null;
 
@@ -221,6 +250,21 @@
                 var page = this.getAttribute('data-page');
                 document.getElementById('pageOverview').style.display = page === 'overview' ? 'block' : 'none';
                 document.getElementById('pageStats').style.display = page === 'stats' ? 'block' : 'none';
+            });
+        }
+
+        var strategyTabs = document.querySelectorAll('.strategy-tab');
+        for (var t = 0; t < strategyTabs.length; t++) {
+            strategyTabs[t].addEventListener('click', function() {
+                var newStrategy = this.getAttribute('data-strategy');
+                currentStrategy = newStrategy;
+                var allTabs = document.querySelectorAll('.strategy-tab');
+                for (var k = 0; k < allTabs.length; k++) {
+                    allTabs[k].classList.toggle('active', allTabs[k].getAttribute('data-strategy') === newStrategy);
+                }
+                document.getElementById('strategyOverview_xuan').style.display = newStrategy === 'xuan' ? 'block' : 'none';
+                document.getElementById('strategyOverview_sykes').style.display = newStrategy === 'sykes' ? 'block' : 'none';
+                if (lastData) renderStats(lastData);
             });
         }
 
@@ -312,6 +356,7 @@
         function openCardHtml(s) {
             var dirClass = s.direction === 'short' ? 'short' : '';
             var dirLabel = s.direction === 'long' ? '做多' : '做空';
+            var tfHtml = s.timeframe ? '<span class="sc-tf">' + escapeHtml(s.timeframe) + '</span>' : '';
             var tpHtml = '<div class="price-box tp"><div class="pb-label">TP</div><div class="pb-value mono">' + formatPrice(s.tp_price) + '</div></div>';
             var liveHtml = '';
             if (s.live_pct != null) {
@@ -323,6 +368,7 @@
                         '<div class="sc-top">' +
                             '<div class="sc-name-group">' +
                                 '<span class="sc-symbol" data-symbol="' + escapeHtml(s.symbol) + '">' + escapeHtml(s.base_symbol) + '</span>' +
+                                tfHtml +
                                 tvButtonHtml(s.symbol) +
                             '</div>' +
                             '<span class="sc-dir ' + s.direction + '">' + dirLabel + '</span>' +
@@ -340,6 +386,7 @@
         function closedCardHtml(s) {
             var dirClass = s.direction === 'short' ? 'short' : '';
             var dirLabel = s.direction === 'long' ? '做多' : '做空';
+            var tfHtml = s.timeframe ? '<span class="sc-tf">' + escapeHtml(s.timeframe) + '</span>' : '';
             var win = s.status === 'tp_hit';
             var r = win ? 1 : -1;
             var rClass = r >= 0 ? 'pos' : 'neg';
@@ -348,6 +395,7 @@
                         '<div class="cc-left">' +
                             '<span class="status-dot ' + (win ? 'win' : 'loss') + '"></span>' +
                             '<span class="cc-symbol" data-symbol="' + escapeHtml(s.symbol) + '">' + escapeHtml(s.base_symbol) + '</span>' +
+                            tfHtml +
                             tvButtonHtml(s.symbol) +
                             '<span class="cc-dir ' + dirClass + '">' + dirLabel + '</span>' +
                         '</div>' +
@@ -367,45 +415,33 @@
             }
         }
 
-        function renderOpenSignals(list) {
-            var box = document.getElementById('openSignalsBox');
-            document.getElementById('openCount').textContent = list.length + ' 筆';
+        function renderSignalGroup(boxId, countId, list, emptyText, isClosed) {
+            var box = document.getElementById(boxId);
+            document.getElementById(countId).textContent = list.length + ' 筆';
             if (!list.length) {
-                box.innerHTML = '<div class="panel"><div class="empty">目前沒有追蹤中的訊號</div></div>';
+                box.innerHTML = '<div class="panel"><div class="empty">' + emptyText + '</div></div>';
                 return;
             }
-            var html = '<div class="signal-grid">';
-            for (var i = 0; i < list.length; i++) html += openCardHtml(list[i]);
+            var html = isClosed ? '<div class="closed-grid">' : '<div class="signal-grid">';
+            for (var i = 0; i < list.length; i++) html += (isClosed ? closedCardHtml(list[i]) : openCardHtml(list[i]));
             html += '</div>';
             box.innerHTML = html;
             bindSymbolClicks(box);
         }
 
-        function renderClosedSignals(list) {
-            var box = document.getElementById('closedSignalsBox');
-            document.getElementById('closedCount').textContent = list.length + ' 筆';
-            if (!list.length) {
-                box.innerHTML = '<div class="panel"><div class="empty">還沒有已結束的訊號</div></div>';
-                return;
-            }
-            var html = '<div class="closed-grid">';
-            for (var i = 0; i < list.length; i++) html += closedCardHtml(list[i]);
-            html += '</div>';
-            box.innerHTML = html;
-            bindSymbolClicks(box);
+        function filterList(list, q) {
+            if (!q) return list;
+            return list.filter(function(s) { return s.base_symbol.toUpperCase().indexOf(q) !== -1; });
         }
 
         function applySymbolFilter() {
             if (!lastData) return;
             var q = document.getElementById('symbolFilter').value.trim().toUpperCase();
-            var openList = lastData.open_signals;
-            var closedList = lastData.closed_signals;
-            if (q) {
-                openList = openList.filter(function(s) { return s.base_symbol.toUpperCase().indexOf(q) !== -1; });
-                closedList = closedList.filter(function(s) { return s.base_symbol.toUpperCase().indexOf(q) !== -1; });
-            }
-            renderOpenSignals(openList);
-            renderClosedSignals(closedList);
+
+            renderSignalGroup('xuan_openSignalsBox', 'xuan_openCount', filterList(lastData.xuan_open_signals, q), '目前沒有追蹤中的訊號', false);
+            renderSignalGroup('xuan_closedSignalsBox', 'xuan_closedCount', filterList(lastData.xuan_closed_signals, q), '還沒有已結束的訊號', true);
+            renderSignalGroup('sykes_openSignalsBox', 'sykes_openCount', filterList(lastData.sykes_open_signals, q), '目前沒有追蹤中的訊號', false);
+            renderSignalGroup('sykes_closedSignalsBox', 'sykes_closedCount', filterList(lastData.sykes_closed_signals, q), '還沒有已結束的訊號', true);
         }
 
         function renderPerSymbol(list) {
@@ -427,7 +463,10 @@
             box.innerHTML = '<table><thead><tr><th>幣種</th><th>已平倉訊號數</th><th>勝率</th><th>總R數</th></tr></thead><tbody>' + rows + '</tbody></table>';
         }
 
-        function renderStats(overall, perSymbol) {
+        function renderStats(data) {
+            var overall = currentStrategy === 'xuan' ? data.xuan_overall_stats : data.sykes_overall_stats;
+            var perSymbol = currentStrategy === 'xuan' ? data.xuan_per_symbol_stats : data.sykes_per_symbol_stats;
+
             document.getElementById('statTotal').textContent = overall.total;
             var winRateEl = document.getElementById('statWinRate');
             winRateEl.textContent = overall.win_rate.toFixed(1) + '%';
@@ -482,9 +521,9 @@
                 .then(function(res) { return res.json(); })
                 .then(function(data) {
                     lastData = data;
-                    notifyNewSignals(data.open_signals);
+                    notifyNewSignals(data.xuan_open_signals.concat(data.sykes_open_signals));
                     applySymbolFilter();
-                    renderStats(data.overall_stats, data.per_symbol_stats);
+                    renderStats(data);
                     renderScanList(data);
                 })
                 .catch(function(err) { console.error('資料更新失敗:', err); });
