@@ -79,6 +79,18 @@ def signal_already_recorded(symbol: str, direction: str, candle_time: int, strat
         return row is not None
 
 
+def has_open_signal(symbol: str, strategy: str = 'xuan', timeframe: str = None) -> bool:
+    """檢查這個幣種+策略+時區，目前是否已經有一筆『還沒結束』的訊號，用來避免同一段行情被重複開單。"""
+    with _lock:
+        conn = get_connection()
+        row = conn.execute(
+            "SELECT 1 FROM signals WHERE symbol = ? AND strategy = ? AND (timeframe = ? OR (timeframe IS NULL AND ? IS NULL)) AND status = 'open'",
+            (symbol, strategy, timeframe, timeframe)
+        ).fetchone()
+        conn.close()
+        return row is not None
+
+
 def record_signal(symbol: str, direction: str, entry_price: float, sl_price: float, tp_price: float,
                    candle_time: int, detected_at: int, strategy: str = 'xuan', timeframe: str = None):
     with _lock:
@@ -139,7 +151,6 @@ def symbol_to_tradingview(symbol: str) -> str:
 
 
 def get_symbol_state(symbol: str):
-    """symbol 這個字串可以是複合鍵，例如 'BTC/USDT:USDT::sykes::15m'，用來讓不同策略/週期各自獨立存狀態。"""
     with _lock:
         conn = get_connection()
         row = conn.execute(
@@ -212,12 +223,6 @@ def _row_r_multiple(r) -> float:
 
 
 def get_stats(start_ms: int = None, end_ms: int = None, strategy: str = None):
-    """
-    計算勝率/R數統計 (只看已平倉訊號)，可選時間範圍與策略篩選。
-    回傳 (overall, per_symbol_list)：
-      overall: {'total': int, 'win_rate': float, 'total_r': float}
-      per_symbol_list: [{'symbol': str, 'total': int, 'win_rate': float, 'r': float}, ...]，依R數由高到低排序
-    """
     query = "SELECT * FROM signals WHERE status IN ('tp_hit', 'sl_hit')"
     params = []
     if strategy:
