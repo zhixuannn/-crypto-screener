@@ -1,8 +1,5 @@
 """
 XUAN 3+1 + 賽克斯 BingX 訊號掃描網站 (狀態持久化版)
-- XUAN 3+1：5分鐘線，CHoCH+FVG+BOS+訂單塊
-- 賽克斯：15分鐘、1小時兩個時區各自獨立掃描，Vegas Channel + QQE MOD
-- 兩套策略共用同一份幣種範圍 (CMC前100大 ∩ BingX永續 ∩ 排除穩定幣)
 """
 
 import os
@@ -125,7 +122,6 @@ def scan_one_symbol_stateful(symbol: str):
 # ==================== 賽克斯 (多時區) ====================
 
 def scan_one_sykes_symbol_stateful(symbol: str, timeframe: str):
-    """對單一幣種+單一時區跑賽克斯策略，狀態用複合鍵 'symbol::sykes::timeframe' 獨立存取。"""
     state_key = f'{symbol}::sykes::{timeframe}'
     try:
         exchange = exchange_client.get_exchange()
@@ -166,7 +162,6 @@ def scan_one_sykes_symbol_stateful(symbol: str, timeframe: str):
 # ==================== 未平倉檢查 (兩套策略共用) ====================
 
 def check_open_signal(row: dict):
-    """檢查單一筆『還沒結束』的訊號，用5分鐘K棒的高低點去比對有沒有碰到止盈/止損 (對兩套策略都夠精確)。"""
     symbol = row['symbol']
     strategy_name = row.get('strategy', 'xuan')
     strategy_label = 'XUAN 3+1' if strategy_name == 'xuan' else f"賽克斯 {row.get('timeframe', '')}"
@@ -234,6 +229,7 @@ def scan_market():
     logger.info(f'共 {len(symbols)} 個幣種 (CMC前100大 ∩ BingX永續，已排除穩定幣)，開始逐一掃描 (併發數: {MAX_WORKERS})')
 
     found_count = 0
+    skipped_already_open = 0
 
     # ---- XUAN 3+1 ----
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
@@ -241,6 +237,9 @@ def scan_market():
         for future in as_completed(futures):
             symbol, signals = future.result()
             for signal in signals:
+                if database.has_open_signal(symbol, strategy='xuan', timeframe=TIMEFRAME):
+                    skipped_already_open += 1
+                    continue
                 already = database.signal_already_recorded(symbol, signal.direction, signal.candle_time, strategy='xuan', timeframe=TIMEFRAME)
                 if already:
                     continue
@@ -264,6 +263,9 @@ def scan_market():
             for future in as_completed(futures):
                 symbol, timeframe, signals = future.result()
                 for signal in signals:
+                    if database.has_open_signal(symbol, strategy='sykes', timeframe=timeframe):
+                        skipped_already_open += 1
+                        continue
                     already = database.signal_already_recorded(symbol, signal.direction, signal.candle_time, strategy='sykes', timeframe=timeframe)
                     if already:
                         continue
@@ -282,7 +284,7 @@ def scan_market():
                     logger.info(f'[賽克斯 {timeframe}] 新訊號: {symbol} {signal.direction} @ {signal.entry_price}')
 
     elapsed = time.time() - start_time
-    logger.info(f'掃描完成，耗時 {elapsed:.1f} 秒，共 {found_count} 個新訊號')
+    logger.info(f'掃描完成，耗時 {elapsed:.1f} 秒，共 {found_count} 個新訊號，{skipped_already_open} 個因已有未平倉訊號被跳過')
 
 
 # ==================== 資料整理 (給前端用) ====================
