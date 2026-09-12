@@ -89,11 +89,12 @@
         .sc-symbol { font-size: 15px; font-weight: 600; cursor: pointer; }
         .sc-symbol:hover { color: var(--gold-bright); }
         .sc-tf { font-size: 10px; color: var(--text-dim); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; }
-        .tv-btn {
+        .tv-link {
             font-size: 10px; font-weight: 600; color: var(--text-dim);
-            border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; cursor: pointer;
+            border: 1px solid var(--border); border-radius: 3px; padding: 2px 6px;
+            text-decoration: none; display: inline-block;
         }
-        .tv-btn:hover { color: var(--gold-bright); border-color: var(--gold); }
+        .tv-link:hover { color: var(--gold-bright); border-color: var(--gold); }
         .sc-dir { font-size: 12px; font-weight: 600; }
         .sc-dir.long { color: var(--long); }
         .sc-dir.short { color: var(--short); }
@@ -111,20 +112,22 @@
         .live-pct-row .live-val.pos { color: var(--long); }
         .live-pct-row .live-val.neg { color: var(--short); }
 
-        .sc-status-row { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-dim); padding-top: 8px; border-top: 1px solid var(--border); }
+        .sc-status-row { display: flex; align-items: center; justify-content: space-between; gap: 5px; font-size: 12px; color: var(--text-dim); padding-top: 8px; border-top: 1px solid var(--border); }
+        .sc-status-left { display: flex; align-items: center; gap: 5px; }
         .status-dot { width: 6px; height: 6px; border-radius: 1px; background: var(--gold); }
         .status-dot.win { background: var(--long); }
         .status-dot.loss { background: var(--short); }
 
         .closed-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
-        .closed-card { background: var(--panel); border: 1px solid var(--border); border-radius: 3px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+        .closed-card { background: var(--panel); border: 1px solid var(--border); border-radius: 3px; padding: 10px 14px; }
+        .cc-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
         .cc-left { display: flex; align-items: center; gap: 6px; }
         .cc-symbol { font-size: 13px; font-weight: 600; cursor: pointer; }
         .cc-symbol:hover { color: var(--gold-bright); }
         .cc-dir { font-size: 11px; }
         .cc-dir.long { color: var(--long); }
         .cc-dir.short { color: var(--short); }
-        .cc-right { text-align: right; }
+        .cc-bottom { display: flex; align-items: center; justify-content: space-between; padding-top: 8px; border-top: 1px solid var(--border); }
         .cc-r { font-size: 13px; font-weight: 600; }
         .cc-r.pos { color: var(--long); }
         .cc-r.neg { color: var(--short); }
@@ -349,8 +352,10 @@
             knownOpenSignalIds = currentIds;
         }
 
-        function tvButtonHtml(fullSymbol) {
-            return '<span class="tv-btn" data-symbol="' + escapeHtml(fullSymbol) + '">TV</span>';
+        function tvLinkHtml(fullSymbol) {
+            var tvSymbol = symbolToTv(fullSymbol);
+            var url = 'https://www.tradingview.com/chart/?symbol=' + encodeURIComponent(tvSymbol);
+            return '<a class="tv-link" href="' + url + '" target="_blank" rel="noopener">開啟 TV</a>';
         }
 
         function openCardHtml(s) {
@@ -369,7 +374,6 @@
                             '<div class="sc-name-group">' +
                                 '<span class="sc-symbol" data-symbol="' + escapeHtml(s.symbol) + '">' + escapeHtml(s.base_symbol) + '</span>' +
                                 tfHtml +
-                                tvButtonHtml(s.symbol) +
                             '</div>' +
                             '<span class="sc-dir ' + s.direction + '">' + dirLabel + '</span>' +
                         '</div>' +
@@ -379,7 +383,10 @@
                             tpHtml +
                         '</div>' +
                         liveHtml +
-                        '<div class="sc-status-row"><span class="status-dot"></span>追蹤中　' + s.ago_str + '</div>' +
+                        '<div class="sc-status-row">' +
+                            '<span class="sc-status-left"><span class="status-dot"></span>追蹤中　' + s.ago_str + '</span>' +
+                            tvLinkHtml(s.symbol) +
+                        '</div>' +
                     '</div>';
         }
 
@@ -392,16 +399,18 @@
             var rClass = r >= 0 ? 'pos' : 'neg';
             var rSign = r >= 0 ? '+' : '';
             return '<div class="closed-card">' +
-                        '<div class="cc-left">' +
-                            '<span class="status-dot ' + (win ? 'win' : 'loss') + '"></span>' +
-                            '<span class="cc-symbol" data-symbol="' + escapeHtml(s.symbol) + '">' + escapeHtml(s.base_symbol) + '</span>' +
-                            tfHtml +
-                            tvButtonHtml(s.symbol) +
-                            '<span class="cc-dir ' + dirClass + '">' + dirLabel + '</span>' +
+                        '<div class="cc-top">' +
+                            '<div class="cc-left">' +
+                                '<span class="status-dot ' + (win ? 'win' : 'loss') + '"></span>' +
+                                '<span class="cc-symbol" data-symbol="' + escapeHtml(s.symbol) + '">' + escapeHtml(s.base_symbol) + '</span>' +
+                                tfHtml +
+                                '<span class="cc-dir ' + dirClass + '">' + dirLabel + '</span>' +
+                            '</div>' +
                         '</div>' +
-                        '<div class="cc-right">' +
+                        '<div class="cc-bottom">' +
                             '<div class="cc-r mono ' + rClass + '">' + rSign + r.toFixed(1) + 'R</div>' +
                             '<div class="cc-time">' + s.ago_str + '</div>' +
+                            tvLinkHtml(s.symbol) +
                         '</div>' +
                     '</div>';
         }
