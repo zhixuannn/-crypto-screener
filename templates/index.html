@@ -6,193 +6,308 @@
     <title>訊號掃描</title>
     <script src="https://s3.tradingview.com/tv.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=JetBrains+Mono:wght@500;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
     <style>
         * { box-sizing: border-box; }
         :root {
-            --bg: #0a0a0d;
-            --panel: #121319;
-            --panel-alt: #17181f;
-            --border: #24262e;
-            --gold: #b8902f;
-            --gold-bright: #e0b64f;
-            --text: #ecebe6;
-            --text-dim: #8b8d95;
-            --long: #35b37e;
-            --short: #e5484d;
+            --bg: #05060d;
+            --bg2: #090b16;
+            --panel: #0c0f1d;
+            --panel-alt: #11152a;
+            --border: #1c2240;
+            --cyan: #19e3ff;
+            --magenta: #ff3df0;
+            --long: #19ffa3;
+            --short: #ff3d6e;
+            --gold: #ffc94d;
+            --text: #e8ecff;
+            --text-dim: #7c85ad;
         }
         body {
-            font-family: 'IBM Plex Sans', -apple-system, "Microsoft JhengHei", sans-serif;
-            background: var(--bg);
+            font-family: 'Noto Sans TC', 'Rajdhani', -apple-system, "Microsoft JhengHei", sans-serif;
+            background:
+                radial-gradient(900px 500px at 85% -10%, rgba(255, 61, 240, 0.10), transparent 60%),
+                radial-gradient(900px 500px at 10% -10%, rgba(25, 227, 255, 0.10), transparent 60%),
+                var(--bg);
+            background-attachment: fixed;
             color: var(--text);
             margin: 0;
             display: flex;
             min-height: 100vh;
         }
-        .mono { font-family: 'IBM Plex Mono', monospace; }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        .head-font { font-family: 'Rajdhani', 'Noto Sans TC', sans-serif; letter-spacing: 0.04em; }
 
-        .sidebar { width: 168px; flex-shrink: 0; background: var(--panel); border-right: 1px solid var(--border); padding: 22px 14px; transition: width 0.2s, padding 0.2s; overflow: hidden; }
-        .sidebar.collapsed { width: 0; padding: 22px 0; border-right: none; }
-        .sidebar-inner { width: 140px; }
-        .sidebar h1 { font-size: 15px; font-weight: 600; color: var(--gold-bright); margin: 0 0 4px; padding: 0 8px; }
-        .sidebar .sub { color: var(--text-dim); font-size: 11px; margin: 0 0 20px; padding: 0 8px; }
-        .nav-item { display: block; width: 100%; text-align: left; background: none; border: none; color: var(--text-dim); font-size: 13px; font-family: inherit; padding: 9px 10px; border-radius: 4px; cursor: pointer; margin-bottom: 2px; }
-        .nav-item.active { color: var(--gold-bright); background: var(--panel-alt); }
-        .nav-item:hover:not(.active) { color: var(--text); }
+        /* ---------- 側邊欄 ---------- */
+        .sidebar { width: 190px; flex-shrink: 0; background: linear-gradient(180deg, rgba(12,15,29,0.95), rgba(9,11,22,0.95)); border-right: 1px solid var(--border); padding: 24px 14px; transition: width 0.2s, padding 0.2s; overflow: hidden; position: relative; }
+        .sidebar::after { content: ''; position: absolute; top: 0; right: 0; bottom: 0; width: 1px; background: linear-gradient(180deg, transparent, var(--cyan), var(--magenta), transparent); opacity: 0.5; }
+        .sidebar.collapsed { width: 0; padding: 24px 0; border-right: none; }
+        .sidebar.collapsed::after { display: none; }
+        .sidebar-inner { width: 160px; }
+        .brand { display: flex; align-items: center; gap: 10px; padding: 0 8px; margin-bottom: 4px; }
+        .brand-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--long); box-shadow: 0 0 10px var(--long); animation: pulse 2s infinite; }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+        .sidebar h1 { font-family: 'Rajdhani', 'Noto Sans TC', sans-serif; font-size: 20px; font-weight: 700; margin: 0; letter-spacing: 0.08em; background: linear-gradient(90deg, var(--cyan), var(--magenta)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+        .sidebar .sub { color: var(--text-dim); font-size: 11px; margin: 0 0 24px; padding: 0 8px 0 26px; }
+        .nav-item { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: none; border: 1px solid transparent; color: var(--text-dim); font-size: 14px; font-family: inherit; padding: 10px 12px; border-radius: 8px; cursor: pointer; margin-bottom: 4px; transition: all 0.15s; }
+        .nav-item .ico { width: 16px; text-align: center; }
+        .nav-item.active { color: var(--cyan); background: rgba(25, 227, 255, 0.08); border-color: rgba(25, 227, 255, 0.35); box-shadow: 0 0 14px rgba(25, 227, 255, 0.12); }
+        .nav-item:hover:not(.active) { color: var(--text); background: var(--panel-alt); }
 
-        .main { flex: 1; padding: 28px 24px 60px; min-width: 0; position: relative; }
+        .main { flex: 1; padding: 24px 28px 70px; min-width: 0; position: relative; }
 
-        .sidebar-toggle {
-            position: sticky; top: 0;
-            background: var(--panel); border: 1px solid var(--border); color: var(--text-dim);
-            border-radius: 4px; padding: 6px 9px; cursor: pointer; font-size: 13px;
-            margin-bottom: 16px; display: inline-block;
-        }
-        .sidebar-toggle:hover { color: var(--gold-bright); border-color: var(--gold); }
+        .topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; gap: 10px; flex-wrap: wrap; }
+        .sidebar-toggle { background: var(--panel); border: 1px solid var(--border); color: var(--text-dim); border-radius: 8px; padding: 7px 11px; cursor: pointer; font-size: 14px; }
+        .sidebar-toggle:hover { color: var(--cyan); border-color: var(--cyan); }
+        .status-pill { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-dim); background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 6px 14px; }
+        .status-pill b { color: var(--cyan); font-weight: 600; }
 
-        .strategy-tabs { display: flex; gap: 8px; margin-bottom: 20px; }
-        .strategy-tab {
-            background: var(--panel-alt); color: var(--text-dim); border: 1px solid var(--border);
-            border-radius: 4px; padding: 7px 16px; font-size: 13px; cursor: pointer;
-        }
-        .strategy-tab.active { color: var(--gold-bright); border-color: var(--gold); background: var(--panel); }
+        /* ---------- 通用元件 ---------- */
+        .strategy-tabs { display: inline-flex; gap: 4px; margin-bottom: 22px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 4px; }
+        .strategy-tab { background: transparent; color: var(--text-dim); border: none; border-radius: 7px; padding: 8px 20px; font-size: 14px; font-family: inherit; cursor: pointer; transition: all 0.15s; }
+        .strategy-tab.active { color: #04121a; font-weight: 700; background: linear-gradient(90deg, var(--cyan), #7af0ff); box-shadow: 0 0 16px rgba(25, 227, 255, 0.4); }
 
-        .section-head { position: relative; padding-left: 14px; margin: 32px 0 14px; font-size: 14px; font-weight: 600; color: var(--text); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
-        .section-head:first-child { margin-top: 0; }
-        .section-head::before { content: ''; position: absolute; left: 0; top: 2px; bottom: 2px; width: 3px; background: var(--gold); }
-        .section-head .count { color: var(--text-dim); font-weight: 400; font-size: 12px; margin-left: 8px; }
-        .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 18px 20px; }
-        #tv_chart { border-radius: 4px; overflow: hidden; }
+        .section-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin: 34px 0 14px; font-family: 'Rajdhani', 'Noto Sans TC', sans-serif; font-size: 17px; font-weight: 700; letter-spacing: 0.06em; color: var(--text); }
+        .section-head .sh-left { display: flex; align-items: center; gap: 10px; }
+        .section-head .sh-left::before { content: ''; width: 4px; height: 18px; border-radius: 2px; background: linear-gradient(180deg, var(--cyan), var(--magenta)); box-shadow: 0 0 8px var(--cyan); }
+        .section-head .count { color: var(--text-dim); font-weight: 500; font-size: 12px; font-family: 'Noto Sans TC', sans-serif; letter-spacing: 0; }
+        .section-head.first { margin-top: 0; }
+
+        .panel { background: linear-gradient(160deg, rgba(17,21,42,0.9), rgba(12,15,29,0.9)); border: 1px solid var(--border); border-radius: 14px; padding: 18px 20px; }
+        .chart-panel { padding: 8px; border-color: rgba(25, 227, 255, 0.25); box-shadow: 0 0 30px rgba(25, 227, 255, 0.06), inset 0 0 0 1px rgba(255,255,255,0.02); margin-bottom: 26px; }
+        #tv_chart { border-radius: 10px; overflow: hidden; min-height: 460px; background: var(--bg2); display: flex; align-items: center; justify-content: center; color: var(--text-dim); font-size: 13px; }
         #chartPanel { scroll-margin-top: 20px; }
 
-        .filter-input { background: var(--panel-alt); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 7px 12px; font-size: 13px; outline: none; width: 200px; }
+        .filter-input { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 999px; padding: 8px 16px; font-size: 13px; outline: none; width: 220px; font-family: inherit; }
+        .filter-input:focus { border-color: var(--cyan); box-shadow: 0 0 12px rgba(25,227,255,0.2); }
         .filter-input::placeholder { color: var(--text-dim); }
 
-        .range-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-        .range-btn { background: var(--panel-alt); color: var(--text-dim); border: 1px solid var(--border); border-radius: 4px; padding: 5px 12px; font-size: 12px; cursor: pointer; }
-        .range-btn.active { color: var(--gold-bright); border-color: var(--gold); }
-        .range-bar input[type="date"] { background: var(--panel-alt); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; font-size: 12px; display: none; }
+        .range-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-family: 'Noto Sans TC', sans-serif; letter-spacing: 0; }
+        .range-btn { background: var(--panel); color: var(--text-dim); border: 1px solid var(--border); border-radius: 999px; padding: 6px 14px; font-size: 12px; cursor: pointer; font-family: inherit; }
+        .range-btn.active { color: var(--cyan); border-color: var(--cyan); box-shadow: 0 0 10px rgba(25,227,255,0.2); }
+        .range-bar input[type="date"] { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 5px 8px; font-size: 12px; display: none; color-scheme: dark; }
         .range-bar.custom-mode input[type="date"] { display: inline-block; }
 
-        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
-        .stat-box { background: var(--panel); padding: 16px 18px; text-align: center; }
-        .stat-label { font-size: 11px; color: var(--text-dim); margin-bottom: 8px; }
-        .stat-value { font-size: 22px; font-weight: 600; }
-        .stat-value.pos { color: var(--long); }
-        .stat-value.neg { color: var(--short); }
+        /* ---------- 訊號卡片 ---------- */
+        .signal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+        .signal-card { position: relative; background: linear-gradient(160deg, rgba(20,25,50,0.95), rgba(10,13,26,0.95)); border: 1px solid var(--border); border-radius: 16px; padding: 18px 18px 14px; overflow: hidden; transition: transform 0.15s, box-shadow 0.15s; }
+        .signal-card:hover { transform: translateY(-2px); }
+        .signal-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, var(--long), transparent); }
+        .signal-card.long { border-color: rgba(25,255,163,0.28); box-shadow: 0 0 22px rgba(25,255,163,0.07); }
+        .signal-card.short { border-color: rgba(255,61,110,0.28); box-shadow: 0 0 22px rgba(255,61,110,0.07); }
+        .signal-card.short::before { background: linear-gradient(90deg, var(--short), transparent); }
+        .signal-card.long:hover { box-shadow: 0 0 28px rgba(25,255,163,0.18); }
+        .signal-card.short:hover { box-shadow: 0 0 28px rgba(255,61,110,0.18); }
 
-        .signal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
-        .signal-card { background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--long); border-radius: 3px; padding: 14px 16px; }
-        .signal-card.short { border-left-color: var(--short); }
-        .sc-top { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 12px; }
-        .sc-name-group { display: flex; align-items: center; gap: 6px; }
-        .sc-symbol { font-size: 15px; font-weight: 600; cursor: pointer; }
-        .sc-symbol:hover { color: var(--gold-bright); }
-        .sc-tf { font-size: 10px; color: var(--text-dim); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; }
-        .tv-link {
-            font-size: 10px; font-weight: 600; color: var(--text-dim);
-            border: 1px solid var(--border); border-radius: 3px; padding: 2px 6px;
-            text-decoration: none; display: inline-block;
-        }
-        .tv-link:hover { color: var(--gold-bright); border-color: var(--gold); }
-        .sc-dir { font-size: 12px; font-weight: 600; }
-        .sc-dir.long { color: var(--long); }
-        .sc-dir.short { color: var(--short); }
+        .sc-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 10px; }
+        .sc-name-group { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+        .sc-symbol { font-family: 'Rajdhani', sans-serif; font-size: 22px; font-weight: 700; cursor: pointer; letter-spacing: 0.04em; }
+        .sc-symbol:hover { color: var(--cyan); text-shadow: 0 0 10px var(--cyan); }
+        .sc-tf { font-size: 11px; color: var(--cyan); border: 1px solid rgba(25,227,255,0.4); border-radius: 6px; padding: 1px 7px; }
+        .dir-badge { font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 999px; white-space: nowrap; }
+        .dir-badge.long { color: var(--long); background: rgba(25,255,163,0.1); border: 1px solid rgba(25,255,163,0.45); }
+        .dir-badge.short { color: var(--short); background: rgba(255,61,110,0.1); border: 1px solid rgba(255,61,110,0.45); }
 
-        .price-boxes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 10px; }
-        .price-box { border: 1px solid var(--border); border-radius: 3px; padding: 6px 4px; text-align: center; }
-        .price-box .pb-label { font-size: 10px; color: var(--text-dim); margin-bottom: 3px; }
-        .price-box .pb-value { font-size: 12px; font-weight: 600; }
-        .price-box.entry { border-color: var(--gold); }
+        .sc-mid { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+        .score-ring { position: relative; width: 62px; height: 62px; flex-shrink: 0; }
+        .score-ring svg { width: 62px; height: 62px; transform: rotate(-90deg); }
+        .score-ring .track { stroke: var(--border); }
+        .score-ring .bar { transition: stroke-dasharray 0.4s; }
+        .score-ring.hi .bar { stroke: var(--long); filter: drop-shadow(0 0 4px var(--long)); }
+        .score-ring.mid .bar { stroke: var(--gold); filter: drop-shadow(0 0 4px var(--gold)); }
+        .score-ring.lo .bar { stroke: var(--text-dim); }
+        .score-ring .num { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 17px; line-height: 1; }
+        .score-ring .num small { font-size: 8px; color: var(--text-dim); font-weight: 500; margin-top: 3px; }
+        .score-ring.empty .num { color: var(--text-dim); font-size: 14px; }
+        .score-detail { flex: 1; min-width: 0; font-size: 12px; color: var(--text-dim); line-height: 1.7; }
+        .score-detail b { color: var(--text); font-family: 'JetBrains Mono', monospace; font-weight: 700; }
+        .score-detail .note { font-size: 11px; opacity: 0.85; }
+
+        .chip-row { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 12px; }
+        .chip { font-size: 10px; padding: 2px 7px; border-radius: 6px; border: 1px solid var(--border); color: var(--text-dim); font-family: 'JetBrains Mono', monospace; white-space: nowrap; }
+        .chip.full { color: var(--long); border-color: rgba(25,255,163,0.45); }
+        .chip.part { color: var(--gold); border-color: rgba(255,201,77,0.45); }
+        .warn-banner { margin-bottom: 12px; padding: 8px 12px; border-radius: 10px; font-size: 12px; line-height: 1.5; color: #ffb347; background: rgba(255,140,0,0.10); border: 1px solid rgba(255,140,0,0.45); }
+        .tv-badge { font-size: 10px; font-weight: 700; color: #7aa7ff; border: 1px solid rgba(122,167,255,0.5); border-radius: 6px; padding: 1px 6px; }
+        .warn-badge { font-size: 11px; color: #ffb347; }
+
+        .price-boxes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+        .price-box { background: rgba(255,255,255,0.025); border: 1px solid var(--border); border-radius: 10px; padding: 8px 6px; text-align: center; }
+        .price-box .pb-label { font-size: 10px; color: var(--text-dim); letter-spacing: 0.1em; margin-bottom: 4px; }
+        .price-box .pb-value { font-size: 12.5px; font-weight: 700; }
+        .price-box.entry { border-color: rgba(25,227,255,0.45); }
+        .price-box.entry .pb-value { color: var(--cyan); }
         .price-box.sl .pb-value { color: var(--short); }
         .price-box.tp .pb-value { color: var(--long); }
 
-        .live-pct-row { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--text-dim); margin-bottom: 8px; }
-        .live-pct-row .live-val { font-weight: 600; }
-        .live-pct-row .live-val.pos { color: var(--long); }
-        .live-pct-row .live-val.neg { color: var(--short); }
+        .live-pct-row { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--text-dim); margin-bottom: 10px; padding: 8px 12px; background: rgba(255,255,255,0.025); border-radius: 10px; }
+        .live-pct-row .live-val { font-size: 16px; font-weight: 700; }
+        .live-val.pos { color: var(--long); text-shadow: 0 0 10px rgba(25,255,163,0.5); }
+        .live-val.neg { color: var(--short); text-shadow: 0 0 10px rgba(255,61,110,0.5); }
 
-        .sc-status-row { display: flex; align-items: center; justify-content: space-between; gap: 5px; font-size: 12px; color: var(--text-dim); padding-top: 8px; border-top: 1px solid var(--border); }
-        .sc-status-left { display: flex; align-items: center; gap: 5px; }
-        .status-dot { width: 6px; height: 6px; border-radius: 1px; background: var(--gold); }
-        .status-dot.win { background: var(--long); }
-        .status-dot.loss { background: var(--short); }
+        .sc-status-row { display: flex; align-items: center; justify-content: space-between; gap: 5px; font-size: 12px; color: var(--text-dim); padding-top: 10px; border-top: 1px dashed var(--border); }
+        .sc-status-left { display: flex; align-items: center; gap: 7px; }
+        .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 8px var(--gold); }
+        .status-dot.win { background: var(--long); box-shadow: 0 0 8px var(--long); }
+        .status-dot.loss { background: var(--short); box-shadow: 0 0 8px var(--short); }
+        .tv-link { font-size: 11px; font-weight: 700; color: var(--text-dim); border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; text-decoration: none; display: inline-block; }
+        .tv-link:hover { color: var(--cyan); border-color: var(--cyan); box-shadow: 0 0 10px rgba(25,227,255,0.25); }
 
-        .closed-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
-        .closed-card { background: var(--panel); border: 1px solid var(--border); border-radius: 3px; padding: 10px 14px; }
-        .cc-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-        .cc-left { display: flex; align-items: center; gap: 6px; }
-        .cc-symbol { font-size: 13px; font-weight: 600; cursor: pointer; }
-        .cc-symbol:hover { color: var(--gold-bright); }
+        /* ---------- 已結單卡片 ---------- */
+        .closed-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+        .closed-card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
+        .closed-card.win { border-left: 3px solid var(--long); }
+        .closed-card.loss { border-left: 3px solid var(--short); }
+        .cc-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+        .cc-left { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+        .cc-symbol { font-family: 'Rajdhani', sans-serif; font-size: 16px; font-weight: 700; cursor: pointer; }
+        .cc-symbol:hover { color: var(--cyan); }
         .cc-dir { font-size: 11px; }
         .cc-dir.long { color: var(--long); }
         .cc-dir.short { color: var(--short); }
-        .cc-bottom { display: flex; align-items: center; justify-content: space-between; padding-top: 8px; border-top: 1px solid var(--border); }
-        .cc-r { font-size: 13px; font-weight: 600; }
+        .score-badge { font-size: 10px; border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; color: var(--text-dim); }
+        .score-badge.hi { color: var(--long); border-color: rgba(25,255,163,0.5); }
+        .score-badge.mid { color: var(--gold); border-color: rgba(255,201,77,0.5); }
+        .cc-bottom { display: flex; align-items: center; justify-content: space-between; padding-top: 9px; border-top: 1px dashed var(--border); }
+        .cc-r { font-size: 16px; font-weight: 700; }
         .cc-r.pos { color: var(--long); }
         .cc-r.neg { color: var(--short); }
-        .cc-time { font-size: 10px; color: var(--text-dim); }
+        .cc-time { font-size: 11px; color: var(--text-dim); }
 
-        .empty { color: var(--text-dim); padding: 24px 0; text-align: center; font-size: 13px; }
+        .empty { color: var(--text-dim); padding: 28px 0; text-align: center; font-size: 13px; }
+
+        /* ---------- 統計頁 ---------- */
+        .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }
+        .kpi { position: relative; background: linear-gradient(160deg, rgba(20,25,50,0.95), rgba(10,13,26,0.95)); border: 1px solid var(--border); border-radius: 16px; padding: 18px 20px; overflow: hidden; }
+        .kpi::after { content: ''; position: absolute; right: -30px; top: -30px; width: 90px; height: 90px; border-radius: 50%; background: radial-gradient(circle, rgba(25,227,255,0.18), transparent 70%); }
+        .kpi.k2::after { background: radial-gradient(circle, rgba(255,61,240,0.18), transparent 70%); }
+        .kpi.k3::after { background: radial-gradient(circle, rgba(25,255,163,0.18), transparent 70%); }
+        .kpi-label { font-size: 12px; color: var(--text-dim); margin-bottom: 10px; }
+        .kpi-value { font-family: 'JetBrains Mono', monospace; font-size: 30px; font-weight: 700; }
+        .kpi-value.pos { color: var(--long); text-shadow: 0 0 14px rgba(25,255,163,0.4); }
+        .kpi-value.neg { color: var(--short); text-shadow: 0 0 14px rgba(255,61,110,0.4); }
+        .kpi-sub { font-size: 11px; color: var(--text-dim); margin-top: 6px; }
+
+        .two-col { display: grid; grid-template-columns: 2fr 1fr; gap: 14px; margin-top: 14px; }
+        .chart-title { font-size: 12px; color: var(--text-dim); margin-bottom: 12px; }
+        #curveBox svg { width: 100%; height: 190px; display: block; }
+        .donut-wrap { display: flex; align-items: center; justify-content: center; gap: 18px; height: 190px; }
+        .donut-wrap svg { width: 130px; height: 130px; transform: rotate(-90deg); }
+        .donut-legend { font-size: 12px; line-height: 2; color: var(--text-dim); }
+        .donut-legend b { font-family: 'JetBrains Mono', monospace; color: var(--text); }
+        .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+
         table { width: 100%; border-collapse: collapse; }
-        th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); font-size: 13px; }
-        th { color: var(--text-dim); font-weight: 500; font-size: 11px; }
+        th, td { text-align: left; padding: 11px 10px; border-bottom: 1px solid var(--border); font-size: 13px; }
+        th { color: var(--text-dim); font-weight: 500; font-size: 11px; letter-spacing: 0.06em; }
+        tr:last-child td { border-bottom: none; }
         .pos-text { color: var(--long); }
         .neg-text { color: var(--short); }
+        .bar-cell { width: 28%; }
+        .minibar { height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
+        .minibar > i { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--cyan), var(--magenta)); }
 
-        details.panel summary { cursor: pointer; list-style: none; font-size: 13px; color: var(--text-dim); display: flex; justify-content: space-between; }
+        details.panel summary { cursor: pointer; list-style: none; font-size: 13px; color: var(--text-dim); display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
         details.panel summary::-webkit-details-marker { display: none; }
-        details.panel summary b { color: var(--text); }
-        .symbol-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
-        .symbol-tag { background: var(--panel-alt); border: 1px solid var(--border); color: var(--text-dim); font-size: 11px; padding: 4px 10px; border-radius: 3px; cursor: pointer; }
-        .symbol-tag:hover { color: var(--gold-bright); border-color: var(--gold); }
+        details.panel summary b { color: var(--cyan); }
+        .symbol-tags { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 16px; }
+        .symbol-tag { background: var(--panel-alt); border: 1px solid var(--border); color: var(--text-dim); font-size: 12px; padding: 5px 12px; border-radius: 999px; cursor: pointer; }
+        .symbol-tag:hover { color: var(--cyan); border-color: var(--cyan); box-shadow: 0 0 10px rgba(25,227,255,0.2); }
+
+        /* ---------- 查幣 ---------- */
+        .lookup-bar { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+        .lookup-input { flex: 1; min-width: 180px; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 999px; padding: 11px 20px; font-size: 15px; outline: none; font-family: inherit; text-transform: uppercase; }
+        .lookup-input:focus { border-color: var(--cyan); box-shadow: 0 0 14px rgba(25,227,255,0.25); }
+        .lookup-input::placeholder { color: var(--text-dim); text-transform: none; }
+        .lookup-btn { background: linear-gradient(90deg, var(--cyan), #7af0ff); color: #04121a; font-weight: 700; border: none; border-radius: 999px; padding: 11px 26px; font-size: 14px; cursor: pointer; font-family: inherit; box-shadow: 0 0 16px rgba(25,227,255,0.35); }
+        .lookup-btn:disabled { opacity: 0.55; cursor: wait; }
+        #lookupResult { margin-bottom: 22px; display: none; }
+        .lk-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+        .lk-title { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+        .lk-sym { font-family: 'Rajdhani', sans-serif; font-size: 30px; font-weight: 700; letter-spacing: 0.04em; }
+        .lk-price { font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 700; }
+        .lk-chg { font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 700; }
+        .lk-chg.pos { color: var(--long); } .lk-chg.neg { color: var(--short); }
+        .lk-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .lk-btn { font-size: 12px; font-weight: 700; color: var(--text-dim); border: 1px solid var(--border); background: transparent; border-radius: 999px; padding: 5px 14px; cursor: pointer; text-decoration: none; font-family: inherit; }
+        .lk-btn:hover { color: var(--cyan); border-color: var(--cyan); }
+        .lk-open { margin-bottom: 14px; padding: 9px 14px; border-radius: 10px; font-size: 13px; background: rgba(25,227,255,0.08); border: 1px solid rgba(25,227,255,0.4); color: var(--cyan); }
+        .tile-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-bottom: 18px; }
+        .tile { background: rgba(255,255,255,0.025); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; }
+        .tile .t-label { font-size: 11px; color: var(--text-dim); margin-bottom: 5px; letter-spacing: 0.06em; }
+        .tile .t-val { font-size: 14px; font-weight: 700; line-height: 1.4; }
+        .tile .t-val.long { color: var(--long); } .tile .t-val.short { color: var(--short); } .tile .t-val.none { color: var(--text-dim); }
+        .tile .t-sub { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+        .tile.good { border-color: rgba(25,255,163,0.45); }
+        .score-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+        .score-col { background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px 6px; }
+        .score-col.long { border-color: rgba(25,255,163,0.3); } .score-col.short { border-color: rgba(255,61,110,0.3); }
+        .score-col h4 { margin: 0 0 12px; font-size: 14px; }
+        .score-col.long h4 { color: var(--long); } .score-col.short h4 { color: var(--short); }
+        .lk-note { font-size: 11px; color: var(--text-dim); margin-top: 12px; }
+        .lk-err { color: var(--short); font-size: 14px; padding: 6px 0; }
+        .lk-similar { margin-top: 8px; display: flex; gap: 7px; flex-wrap: wrap; }
+
+        /* ---------- 手機版 ---------- */
+        @media (max-width: 760px) {
+            body { flex-direction: column; }
+            .sidebar { width: 100%; padding: 12px; border-right: none; border-bottom: 1px solid var(--border); }
+            .sidebar.collapsed { width: 100%; height: 0; padding: 0; overflow: hidden; }
+            .sidebar-inner { width: 100%; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+            .brand { margin: 0; }
+            .sidebar .sub { display: none; }
+            .nav-item { width: auto; margin: 0; }
+            .main { padding: 16px 14px 60px; }
+            .two-col { grid-template-columns: 1fr; }
+            .filter-input { width: 100%; }
+            .score-pair { grid-template-columns: 1fr; }
+            .lk-sym { font-size: 26px; }
+            #tv_chart { min-height: 340px; }
+        }
     </style>
 </head>
 <body>
     <div class="sidebar" id="sidebar">
         <div class="sidebar-inner">
-            <h1>訊號掃描</h1>
+            <div class="brand"><span class="brand-dot"></span><h1>訊號掃描</h1></div>
             <div class="sub">週期 {{ timeframe }}</div>
-            <button class="nav-item active" data-page="overview">總覽</button>
-            <button class="nav-item" data-page="stats">統計</button>
+            <button class="nav-item active" data-page="overview"><span class="ico">◈</span>總覽</button>
+            <button class="nav-item" data-page="stats"><span class="ico">▤</span>統計</button>
         </div>
     </div>
 
     <div class="main">
-        <button class="sidebar-toggle" id="sidebarToggle">☰</button>
+        <div class="topbar">
+            <button class="sidebar-toggle" id="sidebarToggle">☰</button>
+            <span class="status-pill"><span class="brand-dot"></span><span id="statusText">連線中…</span></span>
+        </div>
 
         <div id="pageOverview">
-            <div class="panel" id="chartPanel">
-                <div id="tv_chart"></div>
+            <div class="lookup-bar">
+                <input type="text" class="lookup-input" id="lookupInput" list="lookupList" placeholder="查這隻幣現在的狀況，例如 SOL、PEPE" autocomplete="off" autocapitalize="characters">
+                <datalist id="lookupList"></datalist>
+                <button class="lookup-btn" id="lookupBtn">查詢</button>
+            </div>
+            <div class="panel" id="lookupResult"></div>
+
+            <div class="panel chart-panel" id="chartPanel">
+                <div id="tv_chart">圖表載入中…</div>
             </div>
 
-            <div class="strategy-tabs">
-                <button class="strategy-tab active" data-strategy="xuan">XUAN 3+1</button>
-                <button class="strategy-tab" data-strategy="sykes">賽克斯</button>
-            </div>
-
-            <div class="section-head">
-                訊號
+            <div class="section-head first">
+                <span class="sh-left">XUAN 3+1 訊號</span>
                 <input type="text" class="filter-input" id="symbolFilter" placeholder="搜尋幣種，例如 BTC">
             </div>
 
             <div id="strategyOverview_xuan">
-                <div class="section-head" style="margin-top: 20px;">未結單<span class="count" id="xuan_openCount">0 筆</span></div>
+                <div class="section-head" style="margin-top: 18px;"><span class="sh-left">未結單</span><span class="count" id="xuan_openCount">0 筆</span></div>
                 <div id="xuan_openSignalsBox"><div class="panel"><div class="empty">載入中...</div></div></div>
 
-                <div class="section-head">已結單<span class="count" id="xuan_closedCount">0 筆</span></div>
+                <div class="section-head"><span class="sh-left">已結單</span><span class="count" id="xuan_closedCount">0 筆</span></div>
                 <div id="xuan_closedSignalsBox"><div class="panel"><div class="empty">載入中...</div></div></div>
             </div>
 
-            <div id="strategyOverview_sykes" style="display: none;">
-                <div class="section-head" style="margin-top: 20px;">未結單<span class="count" id="sykes_openCount">0 筆</span></div>
-                <div id="sykes_openSignalsBox"><div class="panel"><div class="empty">載入中...</div></div></div>
-
-                <div class="section-head">已結單<span class="count" id="sykes_closedCount">0 筆</span></div>
-                <div id="sykes_closedSignalsBox"><div class="panel"><div class="empty">載入中...</div></div></div>
-            </div>
-
-            <details class="panel" style="margin-top: 32px;">
+            <details class="panel" style="margin-top: 34px;">
                 <summary>
                     <span><b id="scanCountLabel">目前掃描中：- 個幣種</b>　點開查看清單，點幣種可切換圖表</span>
                     <span id="scanUpdatedLabel"></span>
@@ -202,13 +317,8 @@
         </div>
 
         <div id="pageStats" style="display: none;">
-            <div class="strategy-tabs">
-                <button class="strategy-tab active" data-strategy="xuan">XUAN 3+1</button>
-                <button class="strategy-tab" data-strategy="sykes">賽克斯</button>
-            </div>
-
-            <div class="section-head">
-                整體績效<span class="count">僅計入已平倉訊號</span>
+            <div class="section-head first">
+                <span class="sh-left">整體績效<span class="count">僅計入已平倉訊號</span></span>
                 <div class="range-bar" id="rangeBar">
                     <button class="range-btn active" data-range="today">今天</button>
                     <button class="range-btn" data-range="7d">近7天</button>
@@ -219,31 +329,41 @@
                     <input type="date" id="rangeEnd">
                 </div>
             </div>
-            <div class="stats-grid">
-                <div class="stat-box"><div class="stat-label">已平倉訊號數</div><div class="stat-value mono" id="statTotal">-</div></div>
-                <div class="stat-box"><div class="stat-label">勝率</div><div class="stat-value mono" id="statWinRate">-</div></div>
-                <div class="stat-box"><div class="stat-label">總R數</div><div class="stat-value mono" id="statR">-</div></div>
+
+            <div class="kpi-grid">
+                <div class="kpi"><div class="kpi-label">已平倉訊號數</div><div class="kpi-value" id="statTotal">-</div><div class="kpi-sub" id="statTotalSub"></div></div>
+                <div class="kpi k2"><div class="kpi-label">勝率</div><div class="kpi-value" id="statWinRate">-</div><div class="kpi-sub">止盈 ÷ 全部</div></div>
+                <div class="kpi k3"><div class="kpi-label">總R數</div><div class="kpi-value" id="statR">-</div><div class="kpi-sub">賺 +1R　賠 -1R (TP_RR=1 時)</div></div>
             </div>
 
-            <div class="section-head">分幣種績效</div>
+            <div class="two-col">
+                <div class="panel"><div class="chart-title">累計 R 數曲線</div><div id="curveBox"></div></div>
+                <div class="panel"><div class="chart-title">輸贏比例</div><div id="donutBox"></div></div>
+            </div>
+
+            <div class="section-head"><span class="sh-left">依分數看績效<span class="count">用來決定 SCORE_MIN 要設多少 (滿分100)</span></span></div>
+            <div class="panel" id="byScoreBox"><div class="empty">載入中...</div></div>
+
+            <div class="section-head"><span class="sh-left">分幣種績效</span></div>
             <div class="panel" id="perSymbolBox"><div class="empty">載入中...</div></div>
         </div>
     </div>
 
     <script>
         var currentRange = 'today';
-        var currentStrategy = 'xuan';
         var lastData = null;
         var knownOpenSignalIds = null;
 
         document.getElementById('sidebarToggle').addEventListener('click', function() {
             var sb = document.getElementById('sidebar');
             sb.classList.toggle('collapsed');
-            localStorage.setItem('sidebarCollapsed', sb.classList.contains('collapsed') ? '1' : '0');
+            try { localStorage.setItem('sidebarCollapsed', sb.classList.contains('collapsed') ? '1' : '0'); } catch (e) {}
         });
-        if (localStorage.getItem('sidebarCollapsed') === '1') {
-            document.getElementById('sidebar').classList.add('collapsed');
-        }
+        try {
+            if (localStorage.getItem('sidebarCollapsed') === '1') {
+                document.getElementById('sidebar').classList.add('collapsed');
+            }
+        } catch (e) {}
 
         var navItems = document.querySelectorAll('.nav-item');
         for (var n = 0; n < navItems.length; n++) {
@@ -256,23 +376,13 @@
             });
         }
 
-        var strategyTabs = document.querySelectorAll('.strategy-tab');
-        for (var t = 0; t < strategyTabs.length; t++) {
-            strategyTabs[t].addEventListener('click', function() {
-                var newStrategy = this.getAttribute('data-strategy');
-                currentStrategy = newStrategy;
-                var allTabs = document.querySelectorAll('.strategy-tab');
-                for (var k = 0; k < allTabs.length; k++) {
-                    allTabs[k].classList.toggle('active', allTabs[k].getAttribute('data-strategy') === newStrategy);
-                }
-                document.getElementById('strategyOverview_xuan').style.display = newStrategy === 'xuan' ? 'block' : 'none';
-                document.getElementById('strategyOverview_sykes').style.display = newStrategy === 'sykes' ? 'block' : 'none';
-                if (lastData) renderStats(lastData);
-            });
-        }
-
         function loadWidget(tvSymbol) {
-            document.getElementById('tv_chart').innerHTML = '';
+            var box = document.getElementById('tv_chart');
+            if (typeof TradingView === 'undefined') {
+                box.innerHTML = '圖表無法載入 (' + tvSymbol + ')';
+                return;
+            }
+            box.innerHTML = '';
             new TradingView.widget({
                 "width": "100%",
                 "height": 460,
@@ -282,7 +392,8 @@
                 "theme": "dark",
                 "style": "1",
                 "locale": "zh_TW",
-                "toolbar_bg": "#121319",
+                "toolbar_bg": "#0c0f1d",
+                "backgroundColor": "#090b16",
                 "enable_publishing": false,
                 "hide_top_toolbar": false,
                 "allow_symbol_change": true,
@@ -336,13 +447,14 @@
             for (var i = 0; i < openSignals.length; i++) currentIds[openSignals[i].id] = true;
 
             if (knownOpenSignalIds !== null) {
-                for (var i = 0; i < openSignals.length; i++) {
-                    var s = openSignals[i];
+                for (var j = 0; j < openSignals.length; j++) {
+                    var s = openSignals[j];
                     if (!knownOpenSignalIds[s.id]) {
                         var dirLabel = s.direction === 'long' ? '做多' : '做空';
+                        var scoreText = s.total_score != null ? ' 分數' + s.total_score + '/' + (s.score_max || 100) + (s.warning ? ' ⚠️逆勢/回調段' : '') : '';
                         try {
                             new Notification('新訊號: ' + s.base_symbol, {
-                                body: dirLabel + ' @ ' + s.entry_price,
+                                body: dirLabel + ' @ ' + s.entry_price + scoreText,
                                 tag: 'signal-' + s.id
                             });
                         } catch (e) { console.error('通知發送失敗', e); }
@@ -352,17 +464,103 @@
             knownOpenSignalIds = currentIds;
         }
 
+        function cgUrl(base) {
+            var b = String(base).split('/')[0].replace(/^1000000|^1000/, '');
+            return 'https://www.coinglass.com/currencies/' + encodeURIComponent(b);
+        }
+
+        function cgLinkHtml(fullSymbol) {
+            return '<a class="tv-link" href="' + cgUrl(fullSymbol) + '" target="_blank" rel="noopener">CG</a>';
+        }
+
         function tvLinkHtml(fullSymbol) {
             var tvSymbol = symbolToTv(fullSymbol);
             var url = 'https://www.tradingview.com/chart/?symbol=' + encodeURIComponent(tvSymbol);
-            return '<a class="tv-link" href="' + url + '" target="_blank" rel="noopener">開啟 TV</a>';
+            return '<a class="tv-link" href="' + url + '" target="_blank" rel="noopener">開啟 TV</a> ' + cgLinkHtml(fullSymbol);
+        }
+
+        function scoreClass(total, max) {
+            var pct = total / (max || 100);
+            if (pct >= 0.75) return 'hi';
+            if (pct >= 0.4) return 'mid';
+            return 'lo';
+        }
+
+        function groupSums(detail) {
+            var groups = { '偏見': [0, 0], '結構': [0, 0], '時段': [0, 0], '數據': [0, 0] };
+            for (var i = 0; i < detail.length; i++) {
+                var k = detail[i].k, g;
+                if (k.indexOf('bias') === 0) g = '偏見';
+                else if (k.indexOf('st_') === 0) g = '結構';
+                else if (k.indexOf('sess') === 0) g = '時段';
+                else g = '數據';
+                groups[g][0] += detail[i].s;
+                groups[g][1] += detail[i].m;
+            }
+            return groups;
+        }
+
+        function chipsHtml(detail) {
+            if (!detail || !detail.length) return '';
+            var html = '<div class="chip-row">';
+            for (var i = 0; i < detail.length; i++) {
+                var d = detail[i];
+                var cls = d.s >= d.m ? 'full' : (d.s > 0 ? 'part' : '');
+                html += '<span class="chip ' + cls + '" title="' + escapeHtml(d.n || '') + '">' + escapeHtml(d.l) + ' ' + d.s + '/' + d.m + '</span>';
+            }
+            return html + '</div>';
+        }
+
+        function scoreRingHtml(s) {
+            var C = 2 * Math.PI * 24;
+            if (s.total_score == null) {
+                return '<div class="sc-mid"><div class="score-ring empty"><svg viewBox="0 0 60 60"><circle class="track" cx="30" cy="30" r="24" fill="none" stroke-width="6"></circle></svg>' +
+                       '<div class="num">-<small>無分數</small></div></div>' +
+                       '<div class="score-detail">這筆訊號沒有評分<br><span class="note">資料抓不到或舊訊號</span></div></div>';
+            }
+            var max = s.score_max || 100;
+            var dash = (Math.max(0, Math.min(max, s.total_score)) / max * C).toFixed(1);
+            var cls = scoreClass(s.total_score, max);
+            var detail = s.score_detail || [];
+            var textHtml;
+            if (detail.length > 2) {
+                var g = groupSums(detail);
+                textHtml = '';
+                var names = ['偏見', '結構', '時段', '數據'];
+                for (var n = 0; n < names.length; n++) {
+                    if (g[names[n]][1] > 0) textHtml += names[n] + ' <b>' + g[names[n]][0] + '</b>/' + g[names[n]][1] + '　';
+                }
+            } else {
+                textHtml = 'OI <b>' + (s.oi_score || 0) + '</b>　CVD <b>' + (s.cvd_score || 0) + '</b>';
+            }
+            return '<div class="sc-mid">' +
+                       '<div class="score-ring ' + cls + '"><svg viewBox="0 0 60 60"><circle class="track" cx="30" cy="30" r="24" fill="none" stroke-width="6"></circle>' +
+                       '<circle class="bar" cx="30" cy="30" r="24" fill="none" stroke-width="6" stroke-linecap="round" stroke-dasharray="' + dash + ' ' + C.toFixed(1) + '"></circle></svg>' +
+                       '<div class="num">' + s.total_score + '<small>/' + max + '</small></div></div>' +
+                       '<div class="score-detail">' + textHtml + '</div>' +
+                   '</div>' + chipsHtml(detail);
+        }
+
+        function tvBadgeHtml(s) {
+            return s.tv_confirmed ? '<span class="tv-badge" title="TradingView 警報也確認了這個訊號">TV ✓</span>' : '';
+        }
+
+        function warnBannerHtml(s) {
+            if (!s.warning) return '';
+            return '<div class="warn-banner">⚠️ <b>逆勢／回調段，要小心</b><br>' + escapeHtml(s.warning) + '</div>';
+        }
+
+        function scoreBadgeHtml(s) {
+            if (s.total_score == null) return '';
+            var max = s.score_max || 100;
+            return '<span class="score-badge mono ' + scoreClass(s.total_score, max) + '" title="' + escapeHtml(s.score_note || '') + '">' + s.total_score + '分</span>' +
+                   (s.warning ? '<span class="warn-badge" title="' + escapeHtml(s.warning) + '">⚠️</span>' : '');
         }
 
         function openCardHtml(s) {
-            var dirClass = s.direction === 'short' ? 'short' : '';
-            var dirLabel = s.direction === 'long' ? '做多' : '做空';
-            var tfHtml = s.timeframe ? '<span class="sc-tf">' + escapeHtml(s.timeframe) + '</span>' : '';
-            var tpHtml = '<div class="price-box tp"><div class="pb-label">TP</div><div class="pb-value mono">' + formatPrice(s.tp_price) + '</div></div>';
+            var dirClass = s.direction === 'short' ? 'short' : 'long';
+            var dirLabel = s.direction === 'long' ? '▲ 做多' : '▼ 做空';
+            var tfHtml = s.timeframe ? '<span class="sc-tf mono">' + escapeHtml(s.timeframe) + '</span>' : '';
             var liveHtml = '';
             if (s.live_pct != null) {
                 var liveClass = s.live_pct >= 0 ? 'pos' : 'neg';
@@ -373,14 +571,16 @@
                         '<div class="sc-top">' +
                             '<div class="sc-name-group">' +
                                 '<span class="sc-symbol" data-symbol="' + escapeHtml(s.symbol) + '">' + escapeHtml(s.base_symbol) + '</span>' +
-                                tfHtml +
+                                tfHtml + tvBadgeHtml(s) +
                             '</div>' +
-                            '<span class="sc-dir ' + s.direction + '">' + dirLabel + '</span>' +
+                            '<span class="dir-badge ' + dirClass + '">' + dirLabel + '</span>' +
                         '</div>' +
+                        scoreRingHtml(s) +
+                        warnBannerHtml(s) +
                         '<div class="price-boxes">' +
                             '<div class="price-box entry"><div class="pb-label">進場</div><div class="pb-value mono">' + formatPrice(s.entry_price) + '</div></div>' +
-                            '<div class="price-box sl"><div class="pb-label">SL</div><div class="pb-value mono">' + formatPrice(s.sl_price) + '</div></div>' +
-                            tpHtml +
+                            '<div class="price-box sl"><div class="pb-label">止損 SL</div><div class="pb-value mono">' + formatPrice(s.sl_price) + '</div></div>' +
+                            '<div class="price-box tp"><div class="pb-label">止盈 TP</div><div class="pb-value mono">' + formatPrice(s.tp_price) + '</div></div>' +
                         '</div>' +
                         liveHtml +
                         '<div class="sc-status-row">' +
@@ -391,20 +591,20 @@
         }
 
         function closedCardHtml(s) {
-            var dirClass = s.direction === 'short' ? 'short' : '';
+            var dirClass = s.direction === 'short' ? 'short' : 'long';
             var dirLabel = s.direction === 'long' ? '做多' : '做空';
-            var tfHtml = s.timeframe ? '<span class="sc-tf">' + escapeHtml(s.timeframe) + '</span>' : '';
+            var tfHtml = s.timeframe ? '<span class="sc-tf mono">' + escapeHtml(s.timeframe) + '</span>' : '';
             var win = s.status === 'tp_hit';
             var r = win ? 1 : -1;
             var rClass = r >= 0 ? 'pos' : 'neg';
             var rSign = r >= 0 ? '+' : '';
-            return '<div class="closed-card">' +
+            return '<div class="closed-card ' + (win ? 'win' : 'loss') + '">' +
                         '<div class="cc-top">' +
                             '<div class="cc-left">' +
-                                '<span class="status-dot ' + (win ? 'win' : 'loss') + '"></span>' +
                                 '<span class="cc-symbol" data-symbol="' + escapeHtml(s.symbol) + '">' + escapeHtml(s.base_symbol) + '</span>' +
-                                tfHtml +
+                                tfHtml + tvBadgeHtml(s) +
                                 '<span class="cc-dir ' + dirClass + '">' + dirLabel + '</span>' +
+                                scoreBadgeHtml(s) +
                             '</div>' +
                         '</div>' +
                         '<div class="cc-bottom">' +
@@ -449,8 +649,77 @@
 
             renderSignalGroup('xuan_openSignalsBox', 'xuan_openCount', filterList(lastData.xuan_open_signals, q), '目前沒有追蹤中的訊號', false);
             renderSignalGroup('xuan_closedSignalsBox', 'xuan_closedCount', filterList(lastData.xuan_closed_signals, q), '還沒有已結束的訊號', true);
-            renderSignalGroup('sykes_openSignalsBox', 'sykes_openCount', filterList(lastData.sykes_open_signals, q), '目前沒有追蹤中的訊號', false);
-            renderSignalGroup('sykes_closedSignalsBox', 'sykes_closedCount', filterList(lastData.sykes_closed_signals, q), '還沒有已結束的訊號', true);
+        }
+
+        /* ---------- 統計頁 ---------- */
+        function renderCurve(curve) {
+            var box = document.getElementById('curveBox');
+            if (!curve || curve.length < 2) {
+                box.innerHTML = '<div class="empty" style="height:190px;display:flex;align-items:center;justify-content:center;">至少要有 2 筆已平倉訊號才會畫曲線</div>';
+                return;
+            }
+            var W = 600, H = 190, padL = 8, padR = 8, padT = 12, padB = 12;
+            var pts = [0].concat(curve);
+            var min = Math.min.apply(null, pts), max = Math.max.apply(null, pts);
+            if (max === min) { max += 1; min -= 1; }
+            var span = max - min;
+            function x(i) { return padL + (W - padL - padR) * i / (pts.length - 1); }
+            function y(v) { return padT + (H - padT - padB) * (1 - (v - min) / span); }
+            var line = '';
+            for (var i = 0; i < pts.length; i++) line += (i ? ' L' : 'M') + x(i).toFixed(1) + ' ' + y(pts[i]).toFixed(1);
+            var area = line + ' L' + x(pts.length - 1).toFixed(1) + ' ' + (H - padB) + ' L' + x(0).toFixed(1) + ' ' + (H - padB) + ' Z';
+            var zeroY = y(0).toFixed(1);
+            var up = pts[pts.length - 1] >= 0;
+            var color = up ? '#19ffa3' : '#ff3d6e';
+            box.innerHTML =
+                '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none">' +
+                    '<defs><linearGradient id="cg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="' + color + '" stop-opacity="0.35"/><stop offset="100%" stop-color="' + color + '" stop-opacity="0"/></linearGradient></defs>' +
+                    '<line x1="0" x2="' + W + '" y1="' + zeroY + '" y2="' + zeroY + '" stroke="#1c2240" stroke-dasharray="4 4"/>' +
+                    '<path d="' + area + '" fill="url(#cg)"/>' +
+                    '<path d="' + line + '" fill="none" stroke="' + color + '" stroke-width="2" stroke-linejoin="round" style="filter: drop-shadow(0 0 4px ' + color + ');"/>' +
+                '</svg>';
+        }
+
+        function renderDonut(wins, losses) {
+            var box = document.getElementById('donutBox');
+            var total = wins + losses;
+            if (!total) {
+                box.innerHTML = '<div class="empty" style="height:190px;display:flex;align-items:center;justify-content:center;">還沒有資料</div>';
+                return;
+            }
+            var C = 2 * Math.PI * 40;
+            var winLen = (wins / total * C).toFixed(1);
+            box.innerHTML =
+                '<div class="donut-wrap">' +
+                    '<svg viewBox="0 0 100 100">' +
+                        '<circle cx="50" cy="50" r="40" fill="none" stroke="#ff3d6e" stroke-width="12"/>' +
+                        '<circle cx="50" cy="50" r="40" fill="none" stroke="#19ffa3" stroke-width="12" stroke-dasharray="' + winLen + ' ' + C.toFixed(1) + '" style="filter: drop-shadow(0 0 4px #19ffa3);"/>' +
+                    '</svg>' +
+                    '<div class="donut-legend">' +
+                        '<div><span class="dot" style="background:#19ffa3"></span>止盈 <b>' + wins + '</b></div>' +
+                        '<div><span class="dot" style="background:#ff3d6e"></span>止損 <b>' + losses + '</b></div>' +
+                    '</div>' +
+                '</div>';
+        }
+
+        function renderByScore(list) {
+            var box = document.getElementById('byScoreBox');
+            if (!list || !list.length) {
+                box.innerHTML = '<div class="empty">還沒有已平倉的訊號可以統計</div>';
+                return;
+            }
+            var rows = '';
+            for (var i = 0; i < list.length; i++) {
+                var row = list[i];
+                rows += '<tr>' +
+                            '<td class="mono">' + escapeHtml(row.label) + '</td>' +
+                            '<td class="mono">' + row.total + '</td>' +
+                            '<td class="bar-cell"><div class="minibar"><i style="width:' + Math.min(100, row.win_rate).toFixed(0) + '%"></i></div></td>' +
+                            '<td class="mono ' + (row.win_rate >= 50 ? 'pos-text' : 'neg-text') + '">' + row.win_rate.toFixed(1) + '%</td>' +
+                            '<td class="mono ' + (row.r >= 0 ? 'pos-text' : 'neg-text') + '">' + row.r.toFixed(2) + 'R</td>' +
+                        '</tr>';
+            }
+            box.innerHTML = '<table><thead><tr><th>分數區間</th><th>訊號數</th><th>勝率</th><th></th><th>總R數</th></tr></thead><tbody>' + rows + '</tbody></table>';
         }
 
         function renderPerSymbol(list) {
@@ -463,32 +732,46 @@
             for (var i = 0; i < list.length; i++) {
                 var row = list[i];
                 rows += '<tr>' +
-                            '<td>' + escapeHtml(row.symbol) + '</td>' +
+                            '<td class="head-font" style="font-size:15px;font-weight:700;">' + escapeHtml(row.symbol) + '</td>' +
                             '<td class="mono">' + row.total + '</td>' +
+                            '<td class="bar-cell"><div class="minibar"><i style="width:' + Math.min(100, row.win_rate).toFixed(0) + '%"></i></div></td>' +
                             '<td class="mono ' + (row.win_rate >= 50 ? 'pos-text' : 'neg-text') + '">' + row.win_rate.toFixed(1) + '%</td>' +
                             '<td class="mono ' + (row.r >= 0 ? 'pos-text' : 'neg-text') + '">' + row.r.toFixed(2) + 'R</td>' +
                         '</tr>';
             }
-            box.innerHTML = '<table><thead><tr><th>幣種</th><th>已平倉訊號數</th><th>勝率</th><th>總R數</th></tr></thead><tbody>' + rows + '</tbody></table>';
+            box.innerHTML = '<table><thead><tr><th>幣種</th><th>訊號數</th><th>勝率</th><th></th><th>總R數</th></tr></thead><tbody>' + rows + '</tbody></table>';
         }
 
         function renderStats(data) {
-            var overall = currentStrategy === 'xuan' ? data.xuan_overall_stats : data.sykes_overall_stats;
-            var perSymbol = currentStrategy === 'xuan' ? data.xuan_per_symbol_stats : data.sykes_per_symbol_stats;
+            var overall = data.xuan_overall_stats;
+            var perSymbol = data.xuan_per_symbol_stats;
 
             document.getElementById('statTotal').textContent = overall.total;
+            var wins = overall.wins || 0, losses = overall.losses || 0;
+            document.getElementById('statTotalSub').textContent = overall.total ? ('止盈 ' + wins + '　止損 ' + losses) : '';
             var winRateEl = document.getElementById('statWinRate');
             winRateEl.textContent = overall.win_rate.toFixed(1) + '%';
-            winRateEl.className = 'stat-value mono ' + (overall.win_rate >= 50 ? 'pos' : 'neg');
+            winRateEl.className = 'kpi-value ' + (overall.total ? (overall.win_rate >= 50 ? 'pos' : 'neg') : '');
             var rEl = document.getElementById('statR');
             rEl.textContent = overall.total_r.toFixed(2) + 'R';
-            rEl.className = 'stat-value mono ' + (overall.total_r >= 0 ? 'pos' : 'neg');
+            rEl.className = 'kpi-value ' + (overall.total ? (overall.total_r >= 0 ? 'pos' : 'neg') : '');
+
+            renderCurve(overall.curve);
+            renderDonut(wins, losses);
+            renderByScore(overall.by_score);
             renderPerSymbol(perSymbol);
         }
 
         function renderScanList(data) {
             document.getElementById('scanCountLabel').textContent = '目前掃描中：' + data.symbols_count + ' 個幣種';
             document.getElementById('scanUpdatedLabel').textContent = data.symbols_updated_str ? ('更新於 ' + data.symbols_updated_str) : '';
+            document.getElementById('statusText').innerHTML = '掃描中　<b>' + data.symbols_count + '</b> 個幣種';
+            var dl = document.getElementById('lookupList');
+            if (dl && !dl.childNodes.length) {
+                var opts = '';
+                for (var d = 0; d < data.scan_symbols.length; d++) opts += '<option value="' + escapeHtml(data.scan_symbols[d]) + '">';
+                dl.innerHTML = opts;
+            }
             var tagsBox = document.getElementById('scanTagsBox');
             if (data.scan_symbols.length) {
                 var tagsHtml = '';
@@ -513,6 +796,123 @@
             }
         }
 
+
+        /* ---------- 查幣 ---------- */
+        function biasTile(label, b) {
+            var d = b ? b.dir : null;
+            var cls = d === 'long' ? 'long' : (d === 'short' ? 'short' : 'none');
+            var txt = d === 'long' ? '▲ 偏多' : (d === 'short' ? '▼ 偏空' : '— 不明');
+            return '<div class="tile"><div class="t-label">' + label + '</div><div class="t-val ' + cls + '">' + txt + '</div></div>';
+        }
+
+        function dirWord(x) { return x === 'bull' ? '多' : (x === 'bear' ? '空' : '不明'); }
+        function dirCls(x) { return x === 'bull' ? 'long' : (x === 'bear' ? 'short' : 'none'); }
+
+        function structTile(label, st) {
+            if (!st) return '<div class="tile"><div class="t-label">' + label + '</div><div class="t-val none">無資料</div></div>';
+            return '<div class="tile"><div class="t-label">' + label + '</div>' +
+                   '<div class="t-val ' + dirCls(st.break_dir) + '">突破 ' + dirWord(st.break_dir) + '</div>' +
+                   '<div class="t-sub">高低點排列：<span class="t-val ' + dirCls(st.arrangement) + '" style="font-size:12px;">' + dirWord(st.arrangement) + '</span></div></div>';
+        }
+
+        function lkScoreCol(dir, sc) {
+            var title = dir === 'long' ? '▲ 如果現在做多' : '▼ 如果現在做空';
+            var ring = scoreRingHtml({ total_score: sc.total, score_max: sc.max, score_detail: sc.detail });
+            return '<div class="score-col ' + dir + '"><h4>' + title + '</h4>' + ring + warnBannerHtml({ warning: sc.warning }) + '</div>';
+        }
+
+        function renderLookup(r) {
+            var box = document.getElementById('lookupResult');
+            box.style.display = 'block';
+            if (!r.ok) {
+                var sim = '';
+                if (r.similar && r.similar.length) {
+                    sim = '<div class="lk-similar">你是不是想找：';
+                    for (var i = 0; i < r.similar.length; i++) sim += '<span class="symbol-tag" data-pick="' + escapeHtml(r.similar[i]) + '">' + escapeHtml(r.similar[i]) + '</span>';
+                    sim += '</div>';
+                }
+                box.innerHTML = '<div class="lk-err">' + escapeHtml(r.error || '查詢失敗') + '</div>' + sim;
+                bindPicks(box);
+                return;
+            }
+            var chg = '';
+            if (r.change_24h != null) {
+                chg = '<span class="lk-chg ' + (r.change_24h >= 0 ? 'pos' : 'neg') + '">' + (r.change_24h >= 0 ? '+' : '') + Number(r.change_24h).toFixed(2) + '% (24h)</span>';
+            }
+            var openHtml = '';
+            if (r.open_signal) {
+                var o = r.open_signal;
+                openHtml = '<div class="lk-open">目前有追蹤中的 XUAN 訊號：' + (o.direction === 'long' ? '▲ 做多' : '▼ 做空') +
+                           '　進場 ' + formatPrice(o.entry_price) + '　止損 ' + formatPrice(o.sl_price) + '　止盈 ' + formatPrice(o.tp_price) + '</div>';
+            }
+            var ss = r.session;
+            var sessTile = '<div class="tile ' + (ss.good_4h ? 'good' : '') + '"><div class="t-label">目前時段</div>' +
+                           '<div class="t-val">' + escapeHtml(ss.label) + '</div>' +
+                           '<div class="t-sub">4H 第 ' + ss.hour_in_4h + ' 小時' + (ss.good_4h ? '（加分段）' : (ss.hour_in_4h === 4 ? '（回調段，小心）' : '')) + '</div></div>';
+            var tiles = '<div class="tile-grid">' +
+                biasTile('日線偏見', r.bias['1d']) + biasTile('4H 偏見', r.bias['4h']) + biasTile('1H 偏見', r.bias['1h']) +
+                structTile('15 分結構', r.structure['15m']) + structTile('5 分結構', r.structure['5m']) + sessTile +
+                '<div class="tile"><div class="t-label">OI（持倉量）</div><div class="t-val" style="font-size:13px;">' + escapeHtml(r.oi) + '</div></div>' +
+                '<div class="tile"><div class="t-label">CVD（買賣力道）</div><div class="t-val" style="font-size:13px;">' + escapeHtml(r.cvd) + '</div></div>' +
+                '</div>';
+            var tvUrl = 'https://www.tradingview.com/chart/?symbol=' + encodeURIComponent(r.tv_symbol);
+            box.innerHTML =
+                '<div class="lk-head">' +
+                    '<div class="lk-title"><span class="lk-sym">' + escapeHtml(r.base) + '</span>' +
+                        '<span class="lk-price">' + formatPrice(r.price) + '</span>' + chg + '</div>' +
+                    '<div class="lk-actions">' +
+                        '<button class="lk-btn" id="lkSwitchChart">看這隻的圖表</button>' +
+                        '<a class="lk-btn" href="' + tvUrl + '" target="_blank" rel="noopener">開啟 TV</a>' +
+                        '<a class="lk-btn" href="' + cgUrl(r.base) + '" target="_blank" rel="noopener">Coinglass</a>' +
+                        '<button class="lk-btn" id="lkClose">關閉</button>' +
+                    '</div>' +
+                '</div>' + openHtml + tiles +
+                '<div class="score-pair">' + lkScoreCol('long', r.score_long) + lkScoreCol('short', r.score_short) + '</div>' +
+                '<div class="lk-note">這是「如果現在進場」的試算，不是訊號，也不會被記錄或發通知。' +
+                    (r.incomplete ? '　⚠️ 部分資料抓不到，分數可能偏低。' : '') +
+                    (r.cached ? '　（60 秒內的快取結果）' : '') + '　耗時 ' + (r.took_ms != null ? r.took_ms + ' ms' : '-') + '</div>';
+            document.getElementById('lkSwitchChart').addEventListener('click', function() {
+                loadWidget(r.tv_symbol);
+                document.getElementById('chartPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+            });
+            document.getElementById('lkClose').addEventListener('click', function() { box.style.display = 'none'; box.innerHTML = ''; });
+        }
+
+        function bindPicks(container) {
+            var els = container.querySelectorAll('[data-pick]');
+            for (var i = 0; i < els.length; i++) {
+                els[i].addEventListener('click', function() {
+                    document.getElementById('lookupInput').value = this.getAttribute('data-pick');
+                    doLookup();
+                });
+            }
+        }
+
+        var lookupBusy = false;
+        function doLookup() {
+            if (lookupBusy) return;
+            var q = document.getElementById('lookupInput').value.trim();
+            if (!q) return;
+            var btn = document.getElementById('lookupBtn');
+            var box = document.getElementById('lookupResult');
+            lookupBusy = true;
+            btn.disabled = true;
+            btn.textContent = '查詢中…';
+            box.style.display = 'block';
+            box.innerHTML = '<div class="empty">正在抓 ' + escapeHtml(q.toUpperCase()) + ' 的資料（大約幾秒）…</div>';
+            fetch('/api/lookup?symbol=' + encodeURIComponent(q))
+                .then(function(res) { return res.json(); })
+                .then(function(r) { renderLookup(r); })
+                .catch(function() { renderLookup({ ok: false, error: '查詢失敗，請稍後再試' }); })
+                .then(function() {
+                    lookupBusy = false;
+                    btn.disabled = false;
+                    btn.textContent = '查詢';
+                });
+        }
+        document.getElementById('lookupBtn').addEventListener('click', doLookup);
+        document.getElementById('lookupInput').addEventListener('keydown', function(e) { if (e.key === 'Enter') doLookup(); });
+
         function buildQueryString() {
             if (currentRange === 'custom') {
                 var s = document.getElementById('rangeStart').value;
@@ -530,12 +930,15 @@
                 .then(function(res) { return res.json(); })
                 .then(function(data) {
                     lastData = data;
-                    notifyNewSignals(data.xuan_open_signals.concat(data.sykes_open_signals));
+                    notifyNewSignals(data.xuan_open_signals);
                     applySymbolFilter();
                     renderStats(data);
                     renderScanList(data);
                 })
-                .catch(function(err) { console.error('資料更新失敗:', err); });
+                .catch(function(err) {
+                    console.error('資料更新失敗:', err);
+                    document.getElementById('statusText').textContent = '資料更新失敗，稍後重試';
+                });
         }
 
         document.getElementById('symbolFilter').addEventListener('input', applySymbolFilter);
