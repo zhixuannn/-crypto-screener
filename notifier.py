@@ -29,11 +29,24 @@ def send_telegram_message(text: str) -> bool:
 
 
 def format_signal_message(symbol: str, direction: str, entry_price: float, sl_price: float, tp_price: float,
-                           timeframe: str, strategy_label: str = 'XUAN 3+1') -> str:
+                           timeframe: str, strategy_label: str = 'XUAN 3+1', score: dict = None, source: str = None) -> str:
     direction_text = '📈 做多 (Long)' if direction == 'long' else '📉 做空 (Short)'
     risk = abs(entry_price - sl_price)
     risk_pct = (risk / entry_price) * 100 if entry_price else 0
     tp_line = f'止盈價: {tp_price:.6g}\n' if tp_price is not None else ''
+    score_line = ''
+    if score:
+        smax = score.get('max', 40)
+        title = '綜合評分' if smax == 100 else '資料評分'
+        detail = score.get('detail') or []
+        if detail:
+            parts = ' ｜ '.join(f"{i['l']} {i['s']}/{i['m']}" for i in detail)
+            score_line = f'{title}: <b>{score["total"]}/{smax}</b>\n{parts}\n'
+        else:
+            score_line = f'{title}: <b>{score["total"]}/{smax}</b>\n'
+        if score.get('warning'):
+            score_line += f'⚠️ <b>逆勢／回調段，要小心</b>：{score["warning"]}\n'
+    source_line = '來源: TV 警報觸發\n' if source == 'tv' else ''
     return (
         f'<b>{strategy_label} 進場訊號</b>\n'
         f'幣種: <b>{symbol}</b>\n'
@@ -42,7 +55,9 @@ def format_signal_message(symbol: str, direction: str, entry_price: float, sl_pr
         f'進場價: {entry_price:.6g}\n'
         f'止損價: {sl_price:.6g}\n'
         f'{tp_line}'
-        f'止損距離: {risk_pct:.2f}%'
+        f'止損距離: {risk_pct:.2f}%\n'
+        f'{score_line}'
+        f'{source_line}'.rstrip('\n')
     )
 
 

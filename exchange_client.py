@@ -3,17 +3,55 @@
 """
 
 import time
+import threading
 import ccxt
 
 
-def get_exchange():
-    """建立 BingX 交易所連線物件 (只讀公開資料，不需要API金鑰)。"""
-    exchange = ccxt.bingx({
+_markets_cache = None
+_markets_loaded_at = 0.0
+_markets_lock = threading.Lock()
+MARKETS_TTL_SEC = 3600
+
+
+def _new_exchange():
+    return ccxt.bingx({
         'enableRateLimit': True,
         'options': {
             'defaultType': 'swap',   # 永續合約
         },
     })
+
+
+def _get_cached_markets():
+    """BingX 的市場清單很大，載入要好幾秒。全站共用一份，每小時才重抓一次。"""
+    global _markets_cache, _markets_loaded_at
+    with _markets_lock:
+        now = time.time()
+        if _markets_cache is not None and now - _markets_loaded_at < MARKETS_TTL_SEC:
+            return _markets_cache
+        try:
+            tmp = _new_exchange()
+            tmp.load_markets()
+            _markets_cache = tmp.markets
+            _markets_loaded_at = now
+        except Exception:
+            # 載入失敗就沿用舊的 (如果有)，沒有的話回傳 None 讓呼叫端自己處理
+            pass
+        return _markets_cache
+
+
+def get_exchange():
+    """
+    建立 BingX 交易所連線物件 (只讀公開資料，不需要API金鑰)。
+    每次都是新的物件 (避免多執行緒互相干擾)，但市場清單用共用快取，不用每次重載。
+    """
+    exchange = _new_exchange()
+    markets = _get_cached_markets()
+    if markets:
+        try:
+            exchange.set_markets(markets)
+        except Exception:
+            pass
     return exchange
 
 
@@ -104,3 +142,9 @@ def get_last_prices(exchange, symbols: list) -> dict:
         if last is not None:
             result[sym] = last
     return result
+
+
+def get_ticker_info(exchange, symbol: str) -> dict:
+    """單一幣種的最新價 + 24 小時漲跌幅(%)。抓不到的欄位是 None。"""
+    t = exchange.fetch_ticker(symbol)
+    return {'price': t.get('last'), 'change_24h': t.get('percentage')}
