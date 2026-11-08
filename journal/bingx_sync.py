@@ -4,6 +4,7 @@
 """
 
 import os
+import json
 import time
 import logging
 import datetime
@@ -274,6 +275,32 @@ def run_sync(full=False):
         return st
     finally:
         _sync_lock.release()
+
+
+def debug_probe(symbol='BTC-USDT', days=7):
+    """除錯用：直接回傳交易所的原始回應（不含金鑰），看看各個端點實際給了什麼。"""
+    ex = _exchange()
+    now = int(time.time() * 1000)
+    start = now - days * DAY_MS
+    out = {}
+    calls = {
+        'positionHistory_ts': lambda: ex.swapV1PrivateGetTradePositionHistory({'symbol': symbol, 'startTs': start, 'endTs': now, 'pageIndex': 1, 'pageSize': 50}),
+        'positionHistory_plain': lambda: ex.swapV1PrivateGetTradePositionHistory({'symbol': symbol}),
+        'allFillOrders': lambda: ex.swapV2PrivateGetTradeAllFillOrders({'symbol': symbol, 'startTs': start, 'endTs': now, 'tradingUnit': 'COIN'}),
+        'fillHistory': lambda: ex.swapV2PrivateGetTradeFillHistory({'symbol': symbol, 'startTs': start, 'endTs': now}),
+        'fullOrder': lambda: ex.swapV1PrivateGetTradeFullOrder({'symbol': symbol, 'startTime': start, 'endTime': now, 'limit': 50}),
+        'allOrders': lambda: ex.swapV2PrivateGetTradeAllOrders({'symbol': symbol, 'startTime': start, 'endTime': now, 'limit': 50}),
+        'income': lambda: ex.swapV2PrivateGetUserIncome({'symbol': symbol, 'startTime': start, 'endTime': now, 'limit': 20}),
+        'positions': lambda: ex.swapV2PrivateGetUserPositions({}),
+    }
+    for name, fn in calls.items():
+        try:
+            resp = fn()
+            txt = json.dumps(resp, ensure_ascii=False, default=str)
+            out[name] = json.loads(txt[:6000]) if len(txt) <= 6000 else {'_truncated': txt[:6000]}
+        except Exception as e:
+            out[name] = {'_error': f'{type(e).__name__}: {e}'[:600]}
+    return out
 
 
 def sync_in_background(full=False):
