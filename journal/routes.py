@@ -8,6 +8,7 @@ import json
 import logging
 import datetime
 from functools import wraps
+from concurrent.futures import ThreadPoolExecutor
 
 import requests
 from flask import (Blueprint, render_template, request, jsonify, session, redirect, url_for,
@@ -149,23 +150,44 @@ def _sync_status():
     return st
 
 
+_pool = ThreadPoolExecutor(max_workers=4)
+
+
 @bp.route('/api/bootstrap')
 @login_required
 def api_bootstrap():
+    store = get_store()
+    # 四個查詢同時送出（伺服器在美國、資料庫在新加坡，一個一個問會慢很多）
+    f_trades = _pool.submit(store.list_trades)
+    f_reviews = _pool.submit(store.list_reviews)
+    f_settings = _pool.submit(_settings)
+    f_sync = _pool.submit(_sync_status)
+    sync = f_sync.result()
     try:
-        bingx_sync.maybe_sync_stale()
+        last = sync.get('last_end_ms')
+        if sync.get('has_keys') and not sync.get('running') and (not last or time.time() * 1000 - float(last) > 5 * 60 * 1000):
+            bingx_sync.sync_in_background()
     except Exception:
         logger.exception('[日誌] 背景同步啟動失敗')
-    store = get_store()
     return jsonify({
-        'trades': store.list_trades(),
-        'reviews': store.list_reviews(),
-        'settings': _settings(),
+        'trades': f_trades.result(),
+        'reviews': f_reviews.result(),
+        'settings': f_settings.result(),
         'defaults': DEFAULT_SETTINGS,
-        'sync': _sync_status(),
+        'sync': sync,
         'store': store.kind,
         'ai': bool(os.environ.get('ANTHROPIC_API_KEY')),
     })
+
+
+@bp.route('/api/debug-bingx')
+@login_required
+def api_debug_bingx():
+    if not bingx_sync.has_keys():
+        return _err('還沒設定 BingX API 金鑰')
+    symbol = request.args.get('symbol', 'BTC-USDT')
+    days = min(int(request.args.get('days', '7') or 7), 30)
+    return jsonify(bingx_sync.debug_probe(symbol, days))
 
 
 def _num(v):
