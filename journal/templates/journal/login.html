@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#081B2E">
+<title>登入｜XUAN 交易日誌</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root { --bg:#f6f5f2; --surface:#fff; --line:#e6e3dc; --ink:#1f2328; --muted:#8a8f96; --accent:#0f766e; --down:#c53030; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#081b2e; --surface:#0e263d; --line:#1d3a55; --ink:#e6edf5; --muted:#8da2b8; --accent:#2dd4bf; --down:#f87171; } }
+  * { box-sizing: border-box; }
+  body { margin:0; min-height:100vh; display:grid; place-items:center; background:var(--bg); color:var(--ink); font-family:"Noto Sans TC",system-ui,sans-serif; padding:16px; }
+  form { width:min(360px,100%); background:var(--surface); border:1px solid var(--line); border-radius:16px; padding:28px; display:grid; gap:14px; }
+  h1 { margin:0; font-size:22px; }
+  p { margin:0; color:var(--muted); font-size:14px; }
+  input { font:inherit; color:inherit; background:transparent; border:1px solid var(--line); border-radius:10px; padding:0 14px; height:46px; }
+  button { font:inherit; font-weight:700; height:46px; border:0; border-radius:10px; background:var(--accent); color:#fff; cursor:pointer; }
+  button:disabled { opacity:.5; }
+  .err { color:var(--down); font-size:14px; }
+</style>
+</head>
+<body>
+<form method="post">
+  <h1>XUAN 交易日誌</h1>
+  <p>請輸入密碼</p>
+  {% if error %}<div class="err">{{ error }}</div>{% endif %}
+  <input type="password" name="password" autocomplete="current-password" placeholder="密碼" aria-label="密碼" autofocus {% if disabled %}disabled{% endif %}>
+  <button type="submit" {% if disabled %}disabled{% endif %}>登入</button>
+</form>
+</body>
+</html>
