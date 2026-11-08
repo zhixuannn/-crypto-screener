@@ -153,18 +153,22 @@ def _position_history(ex, symbol, start_ms, end_ms):
         t2 = min(t + WINDOW_MS, end_ms)
         if t2 - t < WINDOW_MS:          # 區間太短會拿到空的，往前補滿 30 天
             t = max(0, t2 - WINDOW_MS)
-        page = 1
+        page = 0                        # 第一次不帶分頁參數（帶了反而會拿到空的）
         while True:
-            data = _data(ex.swapV1PrivateGetTradePositionHistory({
-                'symbol': symbol, 'startTs': t, 'endTs': t2, 'pageIndex': page, 'pageSize': 100})) or {}
+            params = {'symbol': symbol, 'startTs': t, 'endTs': t2}
+            if page:
+                params.update(pageIndex=page, pageSize=100)
+            data = _data(ex.swapV1PrivateGetTradePositionHistory(params)) or {}
             rows = data.get('positionHistory', []) if isinstance(data, dict) else (data or [])
+            new = 0
             for r in rows:
                 if r.get('positionId') not in seen:
                     seen.add(r.get('positionId'))
                     out.append(r)
-            if len(rows) < 100 or page >= 20:
+                    new += 1
+            if len(rows) < 100 or not new or page >= 20:
                 break
-            page += 1
+            page = 2 if not page else page + 1
             time.sleep(0.15)
         t = t2
         time.sleep(0.15)
@@ -216,8 +220,11 @@ def run_sync(full=False):
         by_ext = {t.get('external_id'): t for t in trades if t.get('external_id')}
         added = updated = 0
         sample = None
+        counts = {}
         for sym in sorted(symbols):
-            for rec in _position_history(ex, sym, start_ms, now_ms):
+            recs = _position_history(ex, sym, start_ms, now_ms)
+            counts[sym] = len(recs)
+            for rec in recs:
                 m = map_history(rec)
                 if m['external_id'] in ('None', ''):
                     continue
@@ -260,7 +267,7 @@ def run_sync(full=False):
                 added += 1
 
         st = dict(st, ok=True, running=False, finished_at=now_iso(), last_end_ms=now_ms, engine='ph',
-                  added=added, updated=updated, removed_old=removed, symbols=sorted(symbols), open_count=len(live_ids),
+                  added=added, updated=updated, removed_old=removed, symbols=sorted(symbols), open_count=len(live_ids), history_counts=counts,
                   seconds=round(time.time() - started, 1), error=None)
         if sample:
             st['sample'] = sample
@@ -288,6 +295,12 @@ def debug_probe(symbol='BTC-USDT', days=30):
         'fillHistory': lambda: ex.swapV2PrivateGetTradeFillHistory({'symbol': symbol, 'startTs': start, 'endTs': now}),
         'income': lambda: ex.swapV2PrivateGetUserIncome({'symbol': symbol, 'startTime': start, 'endTime': now, 'limit': 20}),
         'positions': lambda: ex.swapV2PrivateGetUserPositions({}),
+        'ph_paged': lambda: ex.swapV1PrivateGetTradePositionHistory(
+            {'symbol': symbol, 'startTs': start, 'endTs': now, 'pageIndex': 1, 'pageSize': 100}),
+        'ph_older30': lambda: ex.swapV1PrivateGetTradePositionHistory(
+            {'symbol': symbol, 'startTs': start - 30 * DAY_MS, 'endTs': start}),
+        'ph_90': lambda: ex.swapV1PrivateGetTradePositionHistory(
+            {'symbol': symbol, 'startTs': now - 90 * DAY_MS, 'endTs': now}),
     }
     for name, fn in calls.items():
         try:
