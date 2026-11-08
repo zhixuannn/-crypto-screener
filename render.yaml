@@ -20,3 +20,20 @@ services:
         value: 500
       - key: SCAN_MAX_WORKERS
         value: 5
+      # ---- 交易日誌 /journal ----
+      - key: JOURNAL_PASSWORD
+        sync: false
+      - key: FLASK_SECRET_KEY
+        generateValue: true
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: BINGX_API_KEY
+        sync: false
+      - key: BINGX_API_SECRET
+        sync: false
+      - key: JOURNAL_SYNC_MINUTES
+        value: 5
+      - key: JOURNAL_BACKFILL_DAYS
+        value: 90

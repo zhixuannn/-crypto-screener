@@ -603,6 +603,10 @@ def _startup_binance_check():
 
 database.init_db()
 _scheduler = start_scheduler()
+
+# 交易日誌（/journal）：BingX API 同步 + Supabase
+import journal
+journal.init_app(app, _scheduler)
 threading.Thread(target=_startup_binance_check, daemon=True).start()
 
 if __name__ == '__main__':
