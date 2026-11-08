@@ -26,7 +26,31 @@ OVERLAP_MS = 3 * DAY_MS
 USER_KEYS = ('sl', 'risk_amount', 'setup', 'note', 'reason', 'rule_note')
 USER_LISTS = ('conditions', 'emotions', 'mistakes', 'shots', 'tv_links', 'tps')
 
-_sync_lock = threading.Lock()
+_guard = threading.Lock()
+_running_since = [0.0]          # 同步開始的時間；超過 10 分鐘還沒結束就當它卡住了，允許重新開始
+STALE_SECONDS = 600
+
+
+class _SyncLock:
+    """給 routes 用的相容介面：locked() 代表「正在同步」。"""
+    def locked(self):
+        return bool(_running_since[0]) and time.time() - _running_since[0] < STALE_SECONDS
+
+
+_sync_lock = _SyncLock()
+
+
+def _try_start():
+    with _guard:
+        if _sync_lock.locked():
+            return False
+        _running_since[0] = time.time()
+        return True
+
+
+def _finish():
+    with _guard:
+        _running_since[0] = 0.0
 
 
 def has_keys():
@@ -38,6 +62,7 @@ def _exchange():
         'apiKey': os.environ.get('BINGX_API_KEY', ''),
         'secret': os.environ.get('BINGX_API_SECRET', ''),
         'enableRateLimit': True,
+        'timeout': 15000,
         'options': {'defaultType': 'swap'},
     })
 
@@ -182,13 +207,15 @@ def run_sync(full=False):
         st = {'ok': False, 'error': '還沒設定 BINGX_API_KEY / BINGX_API_SECRET', 'finished_at': now_iso()}
         store.put_kv('sync', dict(store.get_kv('sync', {}) or {}, **st))
         return st
-    if not _sync_lock.acquire(blocking=False):
+    if not _try_start():
         return {'ok': True, 'running': True, 'message': '已經在同步中'}
     started = time.time()
-    prev = store.get_kv('sync', {}) or {}
-    st = dict(prev, running=True, started_at=now_iso(), error=None)
-    store.put_kv('sync', st)
+    st = {}
     try:
+        prev = store.get_kv('sync', {}) or {}
+        st = dict(prev, running=True, started_at=now_iso(), error=None, full=bool(full))
+        store.put_kv('sync', st)
+        logger.info(f'[日誌] 開始同步（full={full}）')
         ex = _exchange()
         now_ms = int(time.time() * 1000)
         trades = store.list_trades()
@@ -213,6 +240,7 @@ def run_sync(full=False):
 
         live_rows = _data(ex.swapV2PrivateGetUserPositions({})) or []
         symbols = _income_symbols(ex, start_ms, now_ms)
+        logger.info(f'[日誌] 找到幣種 {sorted(s for s in symbols if s)}，持倉 {len(live_rows)}')
         symbols |= {r.get('symbol') for r in live_rows if r.get('symbol')}
         symbols |= {(t.get('raw') or {}).get('symbol') for t in open_api}
         symbols.discard(None)
@@ -278,10 +306,13 @@ def run_sync(full=False):
     except Exception as e:
         logger.exception('[日誌] 同步失敗')
         st = dict(st, ok=False, running=False, finished_at=now_iso(), error=f'{type(e).__name__}: {e}'[:500])
-        store.put_kv('sync', st)
+        try:
+            store.put_kv('sync', st)
+        except Exception:
+            logger.exception('[日誌] 寫入同步狀態失敗')
         return st
     finally:
-        _sync_lock.release()
+        _finish()
 
 
 def debug_probe(symbol='BTC-USDT', days=30):
