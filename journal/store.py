@@ -131,8 +131,17 @@ class SupabaseStore:
     def __init__(self, url, key):
         self.url = url.rstrip('/')
         self.key = key
-        self.s = requests.Session()
-        self.s.headers.update({'apikey': key, 'Authorization': f'Bearer {key}'})
+        self._local = threading.local()
+
+    @property
+    def s(self):
+        # 每個執行緒各用一條連線：共用同一條會在同時查詢時出現 SSL「bad record mac」錯誤
+        sess = getattr(self._local, 'sess', None)
+        if sess is None:
+            sess = requests.Session()
+            sess.headers.update({'apikey': self.key, 'Authorization': f'Bearer {self.key}'})
+            self._local.sess = sess
+        return sess
 
     # --- helpers
     def _rest(self, method, table, params=None, body=None, prefer=None):
