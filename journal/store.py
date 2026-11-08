@@ -258,3 +258,7 @@ def get_store():
 def guess_ext(content_type, filename=''):
     ext = mimetypes.guess_extension(content_type or '') or os.path.splitext(filename)[1] or '.png'
     return '.jpg' if ext in ('.jpe', '.jpeg') else ext
+
+
+# 先載入 netrc：requests 在多執行緒裡第一次用到時才 import，Python 3.14 偶爾會因此卡住整個程式
+import netrc  # noqa: E402,F401
