@@ -45,7 +45,7 @@ def format_signal_message(symbol: str, direction: str, entry_price: float, sl_pr
         else:
             score_line = f'{title}: <b>{score["total"]}/{smax}</b>\n'
         if score.get('warning'):
-            score_line += f'⚠️ <b>逆勢／回調段，要小心</b>：{score["warning"]}\n'
+            score_line += f'⚠️ <b>要小心</b>：{score["warning"]}\n'
     source_line = '來源: TV 警報觸發\n' if source == 'tv' else ''
     return (
         f'<b>{strategy_label} 進場訊號</b>\n'
