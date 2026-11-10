@@ -51,9 +51,16 @@ class MemoryStore:
         self.kv = {}
         self.blobs = {}
 
-    def list_trades(self):
+    def list_trades(self, only_source=None, exclude_source=None, status=None):
         with self._lock:
-            return [dict(t) for t in self.trades.values()]
+            out = [dict(t) for t in self.trades.values()]
+        if only_source:
+            out = [t for t in out if t.get('source') == only_source]
+        if exclude_source:
+            out = [t for t in out if t.get('source') != exclude_source]
+        if status:
+            out = [t for t in out if t.get('status') == status]
+        return out
 
     def get_trade(self, tid):
         with self._lock:
@@ -157,11 +164,17 @@ class SupabaseStore:
         return r.json()
 
     # --- trades
-    def list_trades(self):
+    def list_trades(self, only_source=None, exclude_source=None, status=None):
         out, offset, page = [], 0, 1000
+        base = {'select': '*', 'order': 'open_time.desc.nullslast'}
+        if only_source:
+            base['source'] = f'eq.{only_source}'
+        if exclude_source:
+            base['source'] = f'neq.{exclude_source}'
+        if status:
+            base['status'] = f'eq.{status}'
         while True:
-            rows = self._rest('GET', TRADE_TABLE, params={
-                'select': '*', 'order': 'open_time.desc.nullslast', 'limit': page, 'offset': offset})
+            rows = self._rest('GET', TRADE_TABLE, params=dict(base, limit=page, offset=offset))
             out.extend(rows or [])
             if not rows or len(rows) < page:
                 break
