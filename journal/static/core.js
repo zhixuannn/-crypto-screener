@@ -172,7 +172,12 @@ function calc(t) {
     pnl = dir * (exit - entry) / Math.abs(entry - sl) * risk;   // 手動單：盈虧 = R × 風險金額（不含手續費）
   }
   const closed = !isOpen && pnl != null;
-  const R = closed && risk ? pnl / risk : null;
+  // R 跟超人一樣用價格算：(出場 − 進場) ÷ |進場 − 停損|（不含手續費）；沒有出場價才用 盈虧 ÷ 風險金額
+  let R = null;
+  if (closed) {
+    if (entry && exit && sl && entry !== sl) R = dir * (exit - entry) / Math.abs(entry - sl);
+    else if (risk) R = pnl / risk;
+  }
   const tps = (t.tps || []).map(num).filter(fin);
   const rr = entry && sl && tps[0] ? Math.abs(tps[0] - entry) / Math.abs(entry - sl) : null;
   const posValue = qty && entry ? qty * entry : (risk && stopPct ? risk / (stopPct / 100) : null);
@@ -186,7 +191,7 @@ function calc(t) {
   const hasCond = (t.conditions || []).length > 0;
   const hasEmo = (t.emotions || []).length > 0;
   const needShot = st.requireShot !== false && !hasShot;
-  const needR = !risk;
+  const needR = !risk && !(entry && sl && entry !== sl);
   const pending = !t.deleted_at && (needR || !hasCond || needShot);
   const ses = o ? SESSIONS.find((x) => o.hh >= x.from && o.hh < x.to).k : null;
   const out = { dir, entry, sl, exit, qty, lev, isOpen, closed, stopPct, risk, pnl, R, rr, tps, posValue, sugPos, maxLev, sugLev, margin, o, c, holdMin, hasShot, hasCond, hasEmo, needShot, needR, pending, ses,
