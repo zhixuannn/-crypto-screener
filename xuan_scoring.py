@@ -1,49 +1,55 @@
 """
-XUAN 3+1 專用的 100 分評分 (結構 70 + 數據 30)。
+XUAN 3+1 專用的 100 分評分（只看結構和時段，數據面 OI/CVD 已拿掉）。
 
-分項 (每一項都會分開記錄，之後可以在統計頁驗證哪一項真的有用)：
-  日線偏見 15 | 4H偏見 10 | 1H偏見 5      -> 順勢才給分，逆勢 0 分
+分項（每一項都會分開記錄，之後可以在紙上驗證裡看哪一項真的有用）：
+  日線偏見 20 | 4H偏見 15                 -> 順勢才給分，逆勢 0 分
   15分結構 15 | 5分結構 10                -> BOS/CHoCH方向 60% + 高低點排列 40%
-  日內時段 8  | 4H內時段 7               -> D段(16-24)8、M段(12-16)5、A段(8-12)3、夜間0；4H第2、3小時 7
-  OI 15 | CVD 15                          -> 由 scoring.py 的 0~20 分等比例縮成 0~15
+  偏見未完成 15                            -> 做多：今天還沒碰到昨天高點；做空：還沒碰到昨天低點
+  4H流動性獵取 10                          -> 做多：這根(或上一根)4H 刺破前一根 4H 低點又收回；做空反過來
+  4H內時段 10                              -> 第3小時10、第1小時5、第2小時3、第4小時0
+  日內時段 5                               -> 8-12點5、12-16點3、16-24點2、0-8點0（台灣時間）
 
-警告 (不擋訊號，只標記)：
-  1. 訊號落在 4H K棒的第 4 個小時 (回調段)
-  2. 日線偏見跟訊號方向相反 (逆勢)
+這版分數是依使用者超人交易紀錄 61 筆的實際結果調整的（2026-11）。
 
-資料抓不到 (BingX K線或幣安) 時：該項給 0 分並標註『無資料』，
-而且整筆訊號直接放行 (incomplete=True)，避免抓不到資料就把訊號全擋掉。
+警告（不擋訊號，只標記）：
+  1. 訊號落在 4H K棒的第 4 個小時（回調段）
+  2. 日線偏見跟訊號方向相反（逆勢）
+  3. 偏見已完成（已經碰到昨天高／低點）
+
+資料抓不到（BingX K線）時：該項給 0 分並標註『無資料』，整筆訊號照樣放行 (incomplete=True)。
 
 結構：
-  gather(symbol, tf)   -> 『同時』去抓 5 組 K 線 + 幣安 OI/CVD 資料 (比一個一個抓快很多)
+  gather(symbol, tf)   -> 『同時』去抓 5 組 K 線
   score(inputs, direction, candle_time_ms) -> 純計算，不連網路
   evaluate_xuan(...)   = gather + score  (訊號打分用)
-  查幣功能：gather 一次，做多、做空各 score 一次，只花一次抓資料的時間
+  查幣功能：gather 一次，做多、做空各 score 一次
 """
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
 
 import exchange_client
-import scoring
 import bias
 import smc_structure
-import binance_data
 
 logger = logging.getLogger(__name__)
 
-W_BIAS_DAY, W_BIAS_4H, W_BIAS_1H = 15, 10, 5
+W_BIAS_DAY, W_BIAS_4H = 20, 15
 W_STRUCT_15M, W_STRUCT_5M = 15, 10
-W_SESSION_DAY, W_SESSION_4H = 8, 7
-W_OI, W_CVD = 15, 15
-MAX_TOTAL = (W_BIAS_DAY + W_BIAS_4H + W_BIAS_1H + W_STRUCT_15M + W_STRUCT_5M +
-             W_SESSION_DAY + W_SESSION_4H + W_OI + W_CVD)   # = 100
+W_PENDING = 15
+W_SWEEP_4H = 10
+W_SESSION_4H, W_SESSION_DAY = 10, 5
+MAX_TOTAL = (W_BIAS_DAY + W_BIAS_4H + W_STRUCT_15M + W_STRUCT_5M + W_PENDING + W_SWEEP_4H +
+             W_SESSION_4H + W_SESSION_DAY)   # = 100
 
-DAY_SESSION_POINTS = {'D': 8, 'M': 5, 'A': 3, 'N': 0}
+DAY_SESSION_POINTS = {'A': 5, 'M': 3, 'D': 2, 'N': 0}
+H4_SESSION_POINTS = {3: 10, 1: 5, 2: 3, 4: 0}
+
+DAY_MS = 86_400_000
+H4_MS = 14_400_000
 
 # 方便測試時替換
 fetch_closed = exchange_client.fetch_closed_candles
-fetch_binance = binance_data.fetch_inputs
 
 _CANDLE_JOBS = (('1d', 6), ('4h', 6), ('1h', 6), ('15m', 300), ('5m', 300))
 
@@ -54,12 +60,10 @@ def _item(key, label, score, max_points, note):
 
 def gather(symbol: str, signal_timeframe: str = '5m') -> dict:
     """
-    同時抓齊評分需要的所有資料。回傳：
-      {'candles': {'1d': [...]|None, ...}, 'binance': inputs|None, 'binance_ok': bool, 'incomplete': bool}
+    同時抓齊評分需要的 K 線。回傳：
+      {'candles': {'1d': [...]|None, ...}, 'incomplete': bool}
     抓不到的項目是 None，並把 incomplete 設 True。
     """
-    base = symbol.split('/')[0]
-
     def job_candles(tf, limit):
         try:
             ex = exchange_client.get_exchange()   # 每個執行緒自己一個連線物件，但共用市場清單快取
@@ -68,39 +72,81 @@ def gather(symbol: str, signal_timeframe: str = '5m') -> dict:
             logger.warning(f'[XUAN評分] 抓 {symbol} {tf} K線失敗: {e}')
             return None
 
-    def job_binance():
-        try:
-            return ('ok', fetch_binance(base, signal_timeframe))
-        except binance_data.DataSourceUnavailable as e:
-            logger.warning(f'[XUAN評分] 幣安資料不可用 ({base}): {e}')
-            return ('down', None)
-        except Exception as e:
-            logger.warning(f'[XUAN評分] {base} 幣安資料錯誤: {e}')
-            return ('down', None)
-
-    with ThreadPoolExecutor(max_workers=6) as pool:
+    with ThreadPoolExecutor(max_workers=5) as pool:
         futs = {tf: pool.submit(job_candles, tf, lim) for tf, lim in _CANDLE_JOBS}
-        fb = pool.submit(job_binance)
         candles = {tf: f.result() for tf, f in futs.items()}
-        b_state, b_inputs = fb.result()
 
-    incomplete = any(v is None for v in candles.values()) or b_state == 'down'
-    return {'candles': candles, 'binance': b_inputs, 'binance_ok': b_state == 'ok', 'incomplete': incomplete}
+    incomplete = any(v is None for v in candles.values())
+    return {'candles': candles, 'incomplete': incomplete}
+
+
+def bias_progress(candles: dict, direction: str, signal_ms: int):
+    """
+    偏見完成了沒：比較『今天到訊號為止的最高／最低』和『昨天的最高／最低』。
+    今天＝BingX 日K（UTC 0 點＝台灣早上 8 點開盤）。
+    回傳 (done: True/False/None, 說明文字)。
+    """
+    c1d, c15 = candles.get('1d'), candles.get('15m')
+    if not c1d or not c15:
+        return None, '無資料'
+    day_open = signal_ms // DAY_MS * DAY_MS
+    prev = [c for c in c1d if c[0] < day_open]
+    if not prev:
+        return None, '無資料'
+    prev_high, prev_low = prev[-1][2], prev[-1][3]
+    today = [c for c in c15 if day_open <= c[0] <= signal_ms]
+    if not today:
+        return False, '今天剛開盤'
+    hi, lo = max(c[2] for c in today), min(c[3] for c in today)
+    if direction == 'long':
+        return (hi >= prev_high), ('已碰到昨天高點' if hi >= prev_high else '還沒碰到昨天高點')
+    return (lo <= prev_low), ('已碰到昨天低點' if lo <= prev_low else '還沒碰到昨天低點')
+
+
+def sweep_4h(candles: dict, direction: str, signal_ms: int):
+    """
+    4H 流動性獵取：刺破前一根 4H 的低點（做多）／高點（做空）又收回來。
+    看兩種情況，有一種成立就算：
+      1. 訊號所在這根 4H（到訊號為止，用 5 分 K 拼出來）刺破上一根 4H，而且訊號收盤已經收回
+      2. 上一根已收盤的 4H 刺破它前一根，並且收盤收回
+    回傳 (hit: True/False/None, 說明文字)。
+    """
+    c4, c5 = candles.get('4h'), candles.get('5m')
+    if not c4 or not c5:
+        return None, '無資料'
+    cur_open = signal_ms // H4_MS * H4_MS
+    closed = [c for c in c4 if c[0] < cur_open]
+    if not closed:
+        return None, '無資料'
+    prev = closed[-1]
+    cur = [c for c in c5 if cur_open <= c[0] <= signal_ms]
+    if cur:
+        hi, lo, close = max(c[2] for c in cur), min(c[3] for c in cur), cur[-1][4]
+        if direction == 'long' and lo < prev[3] and close > prev[3]:
+            return True, '這根4H掃前低後收回'
+        if direction == 'short' and hi > prev[2] and close < prev[2]:
+            return True, '這根4H掃前高後收回'
+    if len(closed) >= 2:
+        a, b = closed[-2], closed[-1]
+        if direction == 'long' and b[3] < a[3] and b[4] > a[3]:
+            return True, '上一根4H掃前低後收回'
+        if direction == 'short' and b[2] > a[2] and b[4] < a[2]:
+            return True, '上一根4H掃前高後收回'
+    return False, '沒有掃流動性'
 
 
 def score(inputs: dict, direction: str, candle_time_ms: int) -> dict:
     """用 gather() 抓好的資料算出 100 分。回傳 dict：
-      total / max / oi_score / cvd_score / detail(list) / note / warning / incomplete / daily_bias
+      total / max / oi_score / cvd_score(固定0，相容舊欄位) / detail(list) / note / warning / incomplete / daily_bias
     """
     candles = inputs['candles']
     incomplete = inputs['incomplete']
     items = []
     daily_bias = None
 
-    # ---- 偏見 (日 / 4H / 1H) ----
+    # ---- 偏見 (日 / 4H) ----
     for tf, key, label, weight in (('1d', 'bias_d', '日線偏見', W_BIAS_DAY),
-                                   ('4h', 'bias_4h', '4H偏見', W_BIAS_4H),
-                                   ('1h', 'bias_1h', '1H偏見', W_BIAS_1H)):
+                                   ('4h', 'bias_4h', '4H偏見', W_BIAS_4H)):
         c = candles.get(tf)
         if c is None or len(c) < 2:
             items.append(_item(key, label, 0, weight, '無資料'))
@@ -115,6 +161,10 @@ def score(inputs: dict, direction: str, candle_time_ms: int) -> dict:
         else:
             items.append(_item(key, label, 0, weight, '逆勢'))
 
+    # ---- 偏見完成了沒 ----
+    done, done_note = bias_progress(candles, direction, candle_time_ms)
+    items.append(_item('bias_pending', '偏見未完成', W_PENDING if done is False else 0, W_PENDING, done_note))
+
     # ---- 結構 (15m / 5m) ----
     for tf, key, label, weight in (('15m', 'st_15m', '15分結構', W_STRUCT_15M),
                                    ('5m', 'st_5m', '5分結構', W_STRUCT_5M)):
@@ -125,25 +175,16 @@ def score(inputs: dict, direction: str, candle_time_ms: int) -> dict:
         else:
             items.append(_item(key, label, res[0], weight, res[1]))
 
+    # ---- 4H 流動性獵取 ----
+    hit, sweep_note = sweep_4h(candles, direction, candle_time_ms)
+    items.append(_item('liq_4h', '4H流動性獵取', W_SWEEP_4H if hit else 0, W_SWEEP_4H, sweep_note))
+
     # ---- 時段 ----
     hour = bias.tw_hour(candle_time_ms)
+    h4 = bias.hour_in_4h(hour)
+    items.append(_item('sess_4h', '4H內時段', H4_SESSION_POINTS.get(h4, 0), W_SESSION_4H, f'第{h4}小時'))
     sess_code, sess_label = bias.day_session(hour)
     items.append(_item('sess_day', '日內時段', DAY_SESSION_POINTS[sess_code], W_SESSION_DAY, sess_label))
-    h4 = bias.hour_in_4h(hour)
-    items.append(_item('sess_4h', '4H內時段', W_SESSION_4H if h4 in (2, 3) else 0, W_SESSION_4H, f'第{h4}小時'))
-
-    # ---- 數據 (OI / CVD) ----
-    if not inputs.get('binance_ok'):
-        oi_pts = cvd_pts = 0
-        items.append(_item('oi', 'OI', 0, W_OI, '無資料'))
-        items.append(_item('cvd', 'CVD', 0, W_CVD, '無資料'))
-    else:
-        raw = scoring.score_from_inputs(direction, inputs['binance'])
-        oi_pts = round(raw['oi_score'] * W_OI / 20)
-        cvd_pts = round(raw['cvd_score'] * W_CVD / 20)
-        oi_note, _, cvd_note = raw['note'].partition(' | ')
-        items.append(_item('oi', 'OI', oi_pts, W_OI, oi_note))
-        items.append(_item('cvd', 'CVD', cvd_pts, W_CVD, cvd_note))
 
     total = sum(i['s'] for i in items)
 
@@ -153,19 +194,23 @@ def score(inputs: dict, direction: str, candle_time_ms: int) -> dict:
         reasons.append('訊號在 4H 最後 1 小時 (回調段)')
     if daily_bias is not None and daily_bias != direction:
         reasons.append('日線偏見逆勢')
+    if done:
+        reasons.append('偏見已完成 (' + done_note + ')')
     warning = '；'.join(reasons) if reasons else None
 
     note = ' ｜ '.join(f"{i['l']}{i['s']}/{i['m']}({i['n']})" for i in items)
     return {
         'total': total,
         'max': MAX_TOTAL,
-        'oi_score': oi_pts,
-        'cvd_score': cvd_pts,
+        'oi_score': 0,
+        'cvd_score': 0,
         'detail': items,
         'note': note,
         'warning': warning,
         'incomplete': incomplete,
         'daily_bias': daily_bias,
+        'bias_done': done,
+        'sweep_4h': hit,
     }
 
 
