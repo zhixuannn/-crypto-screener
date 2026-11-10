@@ -451,7 +451,7 @@
                     var s = openSignals[j];
                     if (!knownOpenSignalIds[s.id]) {
                         var dirLabel = s.direction === 'long' ? '做多' : '做空';
-                        var scoreText = s.total_score != null ? ' 分數' + s.total_score + '/' + (s.score_max || 100) + (s.warning ? ' ⚠️逆勢/回調段' : '') : '';
+                        var scoreText = s.total_score != null ? ' 分數' + s.total_score + '/' + (s.score_max || 100) + (s.warning ? ' ⚠️' + s.warning : '') : '';
                         try {
                             new Notification('新訊號: ' + s.base_symbol, {
                                 body: dirLabel + ' @ ' + s.entry_price + scoreText,
@@ -487,12 +487,13 @@
         }
 
         function groupSums(detail) {
-            var groups = { '偏見': [0, 0], '結構': [0, 0], '時段': [0, 0], '數據': [0, 0] };
+            var groups = { '偏見': [0, 0], '結構': [0, 0], '流動性': [0, 0], '時段': [0, 0], '數據': [0, 0] };
             for (var i = 0; i < detail.length; i++) {
                 var k = detail[i].k, g;
                 if (k.indexOf('bias') === 0) g = '偏見';
                 else if (k.indexOf('st_') === 0) g = '結構';
                 else if (k.indexOf('sess') === 0) g = '時段';
+                else if (k.indexOf('liq') === 0) g = '流動性';
                 else g = '數據';
                 groups[g][0] += detail[i].s;
                 groups[g][1] += detail[i].m;
@@ -526,7 +527,7 @@
             if (detail.length > 2) {
                 var g = groupSums(detail);
                 textHtml = '';
-                var names = ['偏見', '結構', '時段', '數據'];
+                var names = ['偏見', '結構', '流動性', '時段', '數據'];
                 for (var n = 0; n < names.length; n++) {
                     if (g[names[n]][1] > 0) textHtml += names[n] + ' <b>' + g[names[n]][0] + '</b>/' + g[names[n]][1] + '　';
                 }
@@ -547,7 +548,7 @@
 
         function warnBannerHtml(s) {
             if (!s.warning) return '';
-            return '<div class="warn-banner">⚠️ <b>逆勢／回調段，要小心</b><br>' + escapeHtml(s.warning) + '</div>';
+            return '<div class="warn-banner">⚠️ <b>要小心</b><br>' + escapeHtml(s.warning) + '</div>';
         }
 
         function scoreBadgeHtml(s) {
@@ -848,12 +849,12 @@
             var ss = r.session;
             var sessTile = '<div class="tile ' + (ss.good_4h ? 'good' : '') + '"><div class="t-label">目前時段</div>' +
                            '<div class="t-val">' + escapeHtml(ss.label) + '</div>' +
-                           '<div class="t-sub">4H 第 ' + ss.hour_in_4h + ' 小時' + (ss.good_4h ? '（加分段）' : (ss.hour_in_4h === 4 ? '（回調段，小心）' : '')) + '</div></div>';
+                           '<div class="t-sub">4H 第 ' + ss.hour_in_4h + ' 小時' + (ss.good_4h ? '（最佳時段）' : (ss.hour_in_4h === 4 ? '（回調段，小心）' : '')) + '</div></div>';
             var tiles = '<div class="tile-grid">' +
-                biasTile('日線偏見', r.bias['1d']) + biasTile('4H 偏見', r.bias['4h']) + biasTile('1H 偏見', r.bias['1h']) +
+                biasTile('日線偏見', r.bias['1d']) + biasTile('4H 偏見', r.bias['4h']) +
                 structTile('15 分結構', r.structure['15m']) + structTile('5 分結構', r.structure['5m']) + sessTile +
-                '<div class="tile"><div class="t-label">OI（持倉量）</div><div class="t-val" style="font-size:13px;">' + escapeHtml(r.oi) + '</div></div>' +
-                '<div class="tile"><div class="t-label">CVD（買賣力道）</div><div class="t-val" style="font-size:13px;">' + escapeHtml(r.cvd) + '</div></div>' +
+                '<div class="tile"><div class="t-label">偏見完成了沒</div><div class="t-val" style="font-size:13px;">多：' + escapeHtml((r.pending || {}).long || '-') + '<br>空：' + escapeHtml((r.pending || {}).short || '-') + '</div></div>' +
+                '<div class="tile"><div class="t-label">4H 流動性獵取</div><div class="t-val" style="font-size:13px;">多：' + escapeHtml((r.sweep || {}).long || '-') + '<br>空：' + escapeHtml((r.sweep || {}).short || '-') + '</div></div>' +
                 '</div>';
             var tvUrl = 'https://www.tradingview.com/chart/?symbol=' + encodeURIComponent(r.tv_symbol);
             box.innerHTML =
