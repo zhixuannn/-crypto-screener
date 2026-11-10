@@ -189,11 +189,11 @@ def check_open_signals():
         list(pool.map(check_open_signal, open_signals))
 
 
-# ==================== 資料評分 (OI + CVD 背離) ====================
+# ==================== XUAN 評分（結構＋時段，100 分）====================
 
 def score_and_filter(symbol: str, direction: str, timeframe: str, candle_time: int = 0):
     """
-    回傳 (通過嗎, 分數dict或None)。XUAN 100 分制 (結構70 + 數據30)，門檻 SCORE_MIN (預設 0 = 全過)。
+    回傳 (通過嗎, 分數dict或None)。XUAN 100 分制 (偏見、結構、偏見未完成、4H 流動性、時段)，門檻 SCORE_MIN (預設 0 = 全過)。
     - 資料抓不到 (幣安被擋、BingX K線失敗)：直接放行，不會因為抓不到資料而把訊號全擋掉。
     - 總分低於門檻：不通過 (不發 Telegram、不記錄)。
     """
