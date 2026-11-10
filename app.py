@@ -237,6 +237,12 @@ def process_signals(symbol: str, signals: list, timeframe: str, source: str = 's
                 signal.candle_time, int(time.time() * 1000), strategy=strategy, timeframe=timeframe,
                 score=score, source=source
             )
+        try:   # 交易日誌的紙上驗證：當作有下單，之後自動用 K 線結算
+            import journal.paper as _paper
+            _paper.record_signal(symbol, signal.direction, signal.entry_price, signal.sl_price, signal.tp_price,
+                                 signal.candle_time, timeframe, origin=('tv' if source == 'tv' else 'site'), score=score)
+        except Exception as e:
+            logger.warning(f'[紙上] 記錄失敗: {e}')
         message = notifier.format_signal_message(
             symbol, signal.direction, signal.entry_price, signal.sl_price, signal.tp_price, timeframe,
             strategy_label='XUAN 3+1', score=score, source=source
