@@ -128,7 +128,7 @@ def app_page():
 def _asset_version():
     try:
         base = os.path.join(os.path.dirname(__file__), 'static')
-        files = ('core.js', 'pages.js', 'analytics.js', 'settings.js', 'journal.css')
+        files = ('core.js', 'pages.js', 'analytics.js', 'perf.js', 'settings.js', 'journal.css')
         return str(int(max(os.path.getmtime(os.path.join(base, f)) for f in files)))
     except OSError:
         return '1'
@@ -158,7 +158,7 @@ _pool = ThreadPoolExecutor(max_workers=4)
 def api_bootstrap():
     store = get_store()
     # 四個查詢同時送出（伺服器在美國、資料庫在新加坡，一個一個問會慢很多）
-    f_trades = _pool.submit(store.list_trades)
+    f_trades = _pool.submit(store.list_trades, exclude_source='paper')
     f_reviews = _pool.submit(store.list_reviews)
     f_settings = _pool.submit(_settings)
     f_sync = _pool.submit(_sync_status)
@@ -351,6 +351,21 @@ def api_sync_status():
     return jsonify(_sync_status())
 
 
+@bp.route('/api/paper')
+@login_required
+def api_paper():
+    from . import paper
+    rows = [t for t in get_store().list_trades(only_source='paper') if not t.get('deleted_at')]
+    return jsonify({'trades': rows, 'risk': paper.PAPER_RISK})
+
+
+@bp.route('/api/paper/settle', methods=['POST'])
+@login_required
+def api_paper_settle():
+    from . import paper
+    return jsonify(paper.settle_open())
+
+
 @bp.route('/api/upload', methods=['POST'])
 @login_required
 def api_upload():
@@ -384,7 +399,7 @@ def shot(p):
 @bp.route('/api/export.csv')
 @login_required
 def api_export():
-    trades = [t for t in get_store().list_trades() if not t.get('deleted_at')]
+    trades = [t for t in get_store().list_trades(exclude_source='paper') if not t.get('deleted_at')]
     cols = ['open_time', 'close_time', 'symbol', 'side', 'status', 'source', 'setup', 'order_type', 'entry', 'exit',
             'qty', 'leverage', 'sl', 'risk_amount', 'pnl', 'fee', 'conditions', 'emotions', 'mistakes',
             'followed_rules', 'reason', 'note', 'tv_links']
