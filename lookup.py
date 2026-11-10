@@ -1,9 +1,9 @@
 """
 查幣功能：輸入任何一個 BingX USDT 永續合約的代號 (例如 SOL)，
-回傳這隻幣『現在』的狀況：價格、各週期偏見、15m/5m 結構、時段、OI/CVD，
+回傳這隻幣『現在』的狀況：價格、各週期偏見、15m/5m 結構、時段、偏見完成了沒、4H 流動性獵取，
 以及『如果現在做多／做空』會拿幾分 (只是試算，不會發訊號、不會記錄)。
 
-一次查詢大約 7 次資料請求 (5 組 BingX K線 + 幣安 OI/K線 + 行情)，同時進行；
+一次查詢大約 6 次資料請求 (5 組 BingX K線 + 行情)，同時進行；
 同一隻幣 60 秒內重複查會直接用快取，不再重抓。
 """
 
@@ -16,7 +16,6 @@ from concurrent.futures import ThreadPoolExecutor
 import exchange_client
 import xuan_scoring
 import smc_structure
-import scoring
 import bias
 import database
 
@@ -104,10 +103,9 @@ def lookup(raw_symbol: str) -> dict:
         c = candles.get(tf)
         biases[tf] = bias.bias_direction(c) if c and len(c) >= 2 else None
 
-    oi_note = cvd_note = '無資料'
-    if inputs.get('binance_ok') and inputs.get('binance'):
-        raw = scoring.score_from_inputs('long', inputs['binance'])
-        oi_note, _, cvd_note = raw['note'].partition(' | ')
+    score_long = xuan_scoring.score(inputs, 'long', now_ms)
+    score_short = xuan_scoring.score(inputs, 'short', now_ms)
+    note_of = lambda sc, key: next((i['n'] for i in sc['detail'] if i['k'] == key), '無資料')
 
     result = {
         'ok': True,
@@ -119,11 +117,11 @@ def lookup(raw_symbol: str) -> dict:
         'bias': {tf: {'dir': d, 'text': _DIR_WORD[d]} for tf, d in biases.items()},
         'structure': {'15m': _struct_view(candles.get('15m')), '5m': _struct_view(candles.get('5m'))},
         'session': {'code': sess_code, 'label': sess_label, 'hour_in_4h': h4,
-                    'good_4h': h4 in (2, 3), 'tw_hour': hour},
-        'oi': oi_note,
-        'cvd': cvd_note,
-        'score_long': xuan_scoring.score(inputs, 'long', now_ms),
-        'score_short': xuan_scoring.score(inputs, 'short', now_ms),
+                    'good_4h': h4 == 3, 'tw_hour': hour},
+        'pending': {'long': note_of(score_long, 'bias_pending'), 'short': note_of(score_short, 'bias_pending')},
+        'sweep': {'long': note_of(score_long, 'liq_4h'), 'short': note_of(score_short, 'liq_4h')},
+        'score_long': score_long,
+        'score_short': score_short,
         'open_signal': database.get_open_signal_for_symbol(symbol),
         'incomplete': inputs['incomplete'],
         'cached': False,
