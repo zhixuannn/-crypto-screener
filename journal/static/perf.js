@@ -158,7 +158,7 @@ function pfEquityChart(pts, base, hiAt, hiV) {
   svg.append(s('path', { d: `M${line.join('L')}L${X(n - 1)},${H - P.b}L${X(0)},${H - P.b}Z`, fill: 'url(#pfEq)' }),
     s('path', { d: 'M' + line.join('L'), fill: 'none', stroke: 'var(--pf-eq)', 'stroke-width': 2, 'stroke-linejoin': 'round', 'vector-effect': 'non-scaling-stroke' }),
     s('circle', { cx: X(n - 1), cy: Y(pts[n - 1].y), r: 4, fill: 'var(--pf-eq)' }));
-  if (hiAt > 0) svg.append(s('text', { x: X(hiAt), y: Y(hiV) - 7, 'text-anchor': hiAt > n * 0.8 ? 'end' : 'middle', class: 'pf-lbl' }, `最高 ${Math.round(hiV).toLocaleString('en-US')}`));
+  if (hiAt > 0) svg.append(s('text', { x: X(hiAt) + (hiAt < n * 0.15 ? 6 : 0), y: Y(hiV) - 7, 'text-anchor': hiAt < n * 0.15 ? 'start' : hiAt > n * 0.8 ? 'end' : 'middle', class: 'pf-lbl' }, `最高 ${Math.round(hiV).toLocaleString('en-US')}`));
   pfHover(svg, box, pts, X, Y, W, (p) => [p.x, h('div', { class: 'mono' }, fmtMoney(p.y)), p.note ? h('div', { class: 'muted' }, `這筆 ${p.note}`) : null]);
   box.prepend(svg);
   return box;
@@ -177,7 +177,7 @@ function pfDDChart(pts, mdd, mddAt) {
   svg.append(s('path', { d: `M${X(0)},${Y(0)}L${line.join('L')}L${X(n - 1)},${Y(0)}Z`, fill: 'var(--loss)', 'fill-opacity': 0.16 }),
     s('path', { d: 'M' + line.join('L'), fill: 'none', stroke: 'var(--loss)', 'stroke-width': 1.6, 'vector-effect': 'non-scaling-stroke' }));
   if (mdd < 0) svg.append(s('circle', { cx: X(mddAt), cy: Y(mdd), r: 3.5, fill: 'var(--loss)' }),
-    s('text', { x: X(mddAt), y: Math.min(Y(mdd) + 16, H - 2), 'text-anchor': mddAt > n * 0.8 ? 'end' : 'middle', class: 'pf-lbl loss' }, `最深 ${fmtPctS(mdd)}`));
+    s('text', { x: X(mddAt), y: Math.min(Y(mdd) + 16, H - 2), 'text-anchor': mddAt < n * 0.15 ? 'start' : mddAt > n * 0.8 ? 'end' : 'middle', class: 'pf-lbl loss' }, `最深 ${fmtPctS(mdd)}`));
   pfHover(svg, box, pts, X, Y, W, (p) => [p.x, h('div', { class: 'mono loss' }, fmtPctS(p.dd))], 'dd');
   box.prepend(svg);
   return box;
