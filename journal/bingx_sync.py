@@ -280,7 +280,7 @@ def run_sync(full=False):
         logger.info(f'[日誌] 開始同步（full={full}）')
         ex = _exchange()
         now_ms = int(time.time() * 1000)
-        trades = store.list_trades()
+        trades = store.list_trades(exclude_source='paper')
 
         # 舊版（用成交明細組的）資料：沒補過任何東西的就清掉，避免和新資料重複
         removed = 0
@@ -289,7 +289,7 @@ def run_sync(full=False):
                 if t.get('source') == 'api' and str(t.get('external_id', '')).startswith('fill:') and not _has_user_data(t):
                     store.delete_trade_hard(t['id'])
                     removed += 1
-            trades = store.list_trades()
+            trades = store.list_trades(exclude_source='paper')
             full = True
 
         last_ms = prev.get('last_end_ms')
