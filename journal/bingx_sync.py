@@ -200,6 +200,68 @@ def _position_history(ex, symbol, start_ms, end_ms):
     return out
 
 
+def _orders(ex, symbol, start_ms, end_ms):
+    """抓這段時間的所有委託（含已取消的停損單），一次問 7 天。"""
+    out, seen, t = [], set(), start_ms
+    while t < end_ms:
+        t2 = min(t + 7 * DAY_MS, end_ms)
+        data = _data(ex.swapV2PrivateGetTradeAllOrders({'symbol': symbol, 'startTime': t, 'endTime': t2, 'limit': 1000})) or {}
+        rows = data.get('orders', []) if isinstance(data, dict) else (data or [])
+        for r in rows:
+            oid = r.get('orderId')
+            if oid not in seen:
+                seen.add(oid)
+                out.append(r)
+        t = t2
+        time.sleep(0.15)
+    return out
+
+
+def _attached_stop(od):
+    """下單時一起帶的停損（stopLoss 欄位，可能是物件或 JSON 字串）。"""
+    v = od.get('stopLoss')
+    if isinstance(v, str) and v.strip().startswith('{'):
+        try:
+            v = json.loads(v)
+        except ValueError:
+            v = None
+    if isinstance(v, dict):
+        return _f(v.get('stopPrice')) or _f(v.get('price'))
+    return None
+
+
+def _infer_sl(m, orders, now_ms):
+    """從委託紀錄找這筆倉位「最早設的保護性停損價」。找不到回傳 None。"""
+    side, entry = m.get('side'), m.get('entry')
+    o_ms, c_ms = _to_ms(m.get('open_time')), _to_ms(m.get('close_time')) or now_ms
+    if not entry or not o_ms:
+        return None
+    open_side, close_side = ('BUY', 'SELL') if side == 'long' else ('SELL', 'BUY')
+    best = None
+    for od in orders:
+        ps = str(od.get('positionSide', '')).upper()
+        if ps in ('LONG', 'SHORT') and ps.lower() != side:
+            continue
+        ts = _f(od.get('time')) or _f(od.get('updateTime'))
+        if not ts:
+            continue
+        typ = str(od.get('type', '')).upper()
+        oside = str(od.get('side', '')).upper()
+        price = None
+        if typ in ('STOP_MARKET', 'STOP') and oside == close_side and o_ms - 60_000 <= ts <= c_ms:
+            price = _f(od.get('stopPrice'))
+        elif oside == open_side and o_ms - 3 * DAY_MS <= ts <= o_ms + 60_000:
+            price = _attached_stop(od)
+        if not price:
+            continue
+        protective = price < entry if side == 'long' else price > entry
+        if not protective or abs(price - entry) / entry > 0.5:
+            continue
+        if best is None or ts < best[0]:
+            best = (ts, price)
+    return best[1] if best else None
+
+
 # ---------------------------------------------------------------- 同步
 def run_sync(full=False):
     store = get_store()
@@ -249,13 +311,36 @@ def run_sync(full=False):
         added = updated = 0
         sample = None
         counts = {}
+        sl_found = sl_missing = 0
         for sym in sorted(symbols):
             recs = _position_history(ex, sym, start_ms, now_ms)
             counts[sym] = len(recs)
+            maps = []
             for rec in recs:
                 m = map_history(rec)
                 if m['external_id'] in ('None', ''):
                     continue
+                o = by_ext.get(m['external_id'])
+                # 只有「還沒有停損、也沒手動填風險」的單才去找停損（新單，或完整重抓時）
+                need = (not o or full) and not (o and (o.get('sl') not in (None, '') or o.get('risk_amount') not in (None, '')))
+                maps.append((rec, m, need))
+            if any(n for _, _, n in maps):
+                try:
+                    opens = [_to_ms(m['open_time']) for _, m, n in maps if n and m['open_time']]
+                    closes = [_to_ms(m['close_time']) or now_ms for _, m, n in maps if n]
+                    orders = _orders(ex, sym, min(opens) - 3 * DAY_MS, min(max(closes) + 60_000, now_ms)) if opens else []
+                except Exception as e:
+                    logger.warning(f'[日誌] {sym} 抓委託失敗，先不補停損：{e}')
+                    orders = []
+                for _, m, n in maps:
+                    if n:
+                        sl = _infer_sl(m, orders, now_ms)
+                        if sl:
+                            m['sl'] = sl
+                            sl_found += 1
+                        else:
+                            sl_missing += 1
+            for rec, m, _ in maps:
                 sample = sample or rec
                 old = by_ext.get(m['external_id'])
                 if not old:
@@ -296,6 +381,7 @@ def run_sync(full=False):
 
         st = dict(st, ok=True, running=False, finished_at=now_iso(), last_end_ms=now_ms, engine='ph',
                   added=added, updated=updated, removed_old=removed, symbols=sorted(symbols), open_count=len(live_ids), history_counts=counts,
+                  sl_found=sl_found, sl_missing=sl_missing,
                   seconds=round(time.time() - started, 1), error=None)
         if sample:
             st['sample'] = sample
@@ -326,6 +412,8 @@ def debug_probe(symbol='BTC-USDT', days=30):
         'fillHistory': lambda: ex.swapV2PrivateGetTradeFillHistory({'symbol': symbol, 'startTs': start, 'endTs': now}),
         'income': lambda: ex.swapV2PrivateGetUserIncome({'symbol': symbol, 'startTime': start, 'endTime': now, 'limit': 20}),
         'positions': lambda: ex.swapV2PrivateGetUserPositions({}),
+        'allOrders': lambda: ex.swapV2PrivateGetTradeAllOrders(
+            {'symbol': symbol, 'startTime': now - 7 * DAY_MS, 'endTime': now, 'limit': 50}),
         'ph_paged': lambda: ex.swapV1PrivateGetTradePositionHistory(
             {'symbol': symbol, 'startTs': start, 'endTs': now, 'pageIndex': 1, 'pageSize': 100}),
         'ph_older30': lambda: ex.swapV1PrivateGetTradePositionHistory(
