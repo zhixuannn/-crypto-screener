@@ -56,20 +56,28 @@ PAGES.overview = (page) => {
     h('div', { class: 'muted', style: 'font-size:13.5px;margin-top:6px' }, c90 < 100 ? `樣本正在累積；再 ${100 - c90} 筆，讓復盤更有依據` : '樣本夠多了，結論比較有參考價值'),
     h('div', { class: 'muted', style: 'font-size:12px' }, '近 90 日已平倉交易'));
   const recent = live().slice().sort((x, y) => (calc(y).o?.ms || 0) - (calc(x).o?.ms || 0)).slice(0, 10);
-  const vals = recent.map((t) => val(calc(t))).filter(fin);
-  const mx = Math.max(...vals.map(Math.abs), 0.0001);
-  const rhythm = h('div', { class: 'rhythm' }, recent.map((t) => {
-    const k = calc(t); const v = val(k);
-    return h('button', { class: 'it', type: 'button', style: 'border:0;background:transparent;color:inherit', onclick: () => openDrawer(t.id, recent.map((x) => x.id)) },
+  // 節奏圖只畫「已平倉」的單（持倉中的還沒有結果），由舊到新排，最新的在最右邊
+  const rec = closedOf(live()).sort((x, y) => (calc(y).c?.ms || calc(y).o?.ms || 0) - (calc(x).c?.ms || calc(x).o?.ms || 0)).slice(0, 10).reverse();
+  const mainOf = (k) => val(k);
+  const mxMain = Math.max(...rec.map((t) => mainOf(calc(t))).filter(fin).map(Math.abs), 0.0001);
+  const mxU = Math.max(...rec.map((t) => calc(t).pnl).filter(fin).map(Math.abs), 0.0001);
+  const rhythm = h('div', { class: 'rhythm' }, rec.map((t) => {
+    const k = calc(t); const v = mainOf(k);
+    // R 算不出來（沒填停損）時，改用盈虧 U 畫淺色的柱子
+    const useU = !fin(v) && fin(k.pnl);
+    const sv = fin(v) ? v : useU ? k.pnl : null;
+    const ht = sv == null ? 6 : Math.max(6, Math.abs(sv) / (useU ? mxU : mxMain) * 64);
+    const col = sv == null ? 'var(--line)' : sv >= 0 ? 'var(--gain)' : 'var(--loss)';
+    return h('button', { class: 'it', type: 'button', title: `${t.symbol} ${t.side === 'short' ? '做空' : '做多'} ${fmtDT(t.close_time || t.open_time)}`, onclick: () => openDrawer(t.id, rec.map((x) => x.id)) },
       h('span', { class: 'sym' }, baseOf(t.symbol)),
-      h('span', { class: 'bar-wrap' }, h('span', { class: 'bar', style: `height:${fin(v) ? Math.max(8, Math.abs(v) / mx * 64) : 8}px;background:${fin(v) ? (v >= 0 ? 'var(--gain)' : 'var(--loss)') : 'var(--line)'}` })),
-      h('span', { class: t.side === 'short' ? 'side-s' : 'side-l', style: 'font-size:12px' }, t.side === 'short' ? '做空' : '做多'),
-      h('span', { class: 'pl ' + cls(v) }, k.isOpen ? '持倉中' : fin(v) ? fmtV(v) : (state.unit === 'R' ? '未計 R' : '—')));
+      h('span', { class: 'bar-wrap' }, h('span', { class: 'bar' + (useU ? ' soft' : ''), style: `height:${ht}px;background:${col}` })),
+      h('span', { class: t.side === 'short' ? 'side-s' : 'side-l' }, t.side === 'short' ? '空' : '多'),
+      h('span', { class: 'pl ' + cls(sv) }, sv == null ? '—' : fmtS(sv, useU || state.unit !== 'R' ? 0 : 1)));
   }));
   page.append(h('div', { class: 'split' },
     h('section', { class: 'sec' }, h('h2', {}, '數據洞察'), ins),
-    h('section', { class: 'sec vline' }, h('div', { class: 'sec-h' }, h('h2', {}, '近期交易節奏'), h('span', { class: 'muted mono' }, `近 ${recent.length} 筆`)), rhythm,
-      h('div', { class: 'legend' }, h('span', {}, h('i', { style: 'background:var(--gain)' }), '已平倉'), h('span', {}, h('i', { style: 'background:var(--line)' }), state.unit === 'R' ? '缺少 R' : '缺少盈虧'), h('span', {}, '高度代表單筆盈虧')))));
+    h('section', { class: 'sec vline' }, h('div', { class: 'sec-h' }, h('h2', {}, '近期交易節奏'), h('span', { class: 'muted' }, `最近 ${rec.length} 筆 · ${state.unit === 'R' ? 'R' : 'U'}`)), rec.length ? rhythm : h('p', { class: 'muted' }, '還沒有已平倉的交易'),
+      h('div', { class: 'legend' }, h('span', {}, h('i', { style: 'background:var(--gain)' }), '賺'), h('span', {}, h('i', { style: 'background:var(--loss)' }), '賠'), state.unit === 'R' ? h('span', {}, h('i', { style: 'background:var(--muted);opacity:.45' }), '淺色＝沒填停損，改用 U') : null, h('span', {}, '越高＝賺賠越多，最右邊是最新')))));
   page.append(h('div', { class: 'divider' }));
 
   // 最近交易 + 累計趨勢
@@ -275,38 +283,139 @@ async function uploadFiles(files) {
   }
   return out;
 }
-function shotEditor(shots, tvLinks, onChange) {
-  const wrap = h('div', { class: 'dsec' });
-  const busy = h('span', {});
-  const thumbs = h('div', { class: 'shots' }, shots.map((p) => h('div', { class: 'shot' }, h('img', { src: `/journal/shot/${p}`, alt: '盤面截圖', loading: 'lazy', onclick: () => viewImg(`/journal/shot/${p}`) }),
-    h('button', { type: 'button', 'aria-label': '移除截圖', onclick: () => onChange(shots.filter((x) => x !== p), tvLinks) }, '×'))));
-  const fileId = 'f' + Math.random().toString(36).slice(2);
-  const inp = h('input', { type: 'file', id: fileId, accept: 'image/png,image/jpeg,image/webp,image/gif', multiple: true });
-  const doUpload = async (files) => {
-    if (!files.length) return; busy.textContent = '上傳中…';
-    try { const paths = await uploadFiles(files); onChange([...shots, ...paths], tvLinks); } catch (e) { busy.textContent = ''; toast('上傳失敗：' + e.message); }
-  };
-  inp.addEventListener('change', () => doUpload([...inp.files]));
-  const drop = h('div', { class: 'drop' }, icon('image', 22), h('span', {}, '在 TradingView 截圖後，回來按 Ctrl+V（Mac ⌘+V）直接貼上'), h('span', {}, '或把圖片拖進來，或 ', h('label', { for: fileId }, '選擇圖片'), inp), busy);
-  drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
-  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
-  drop.addEventListener('drop', (e) => { e.preventDefault(); drop.classList.remove('over'); doUpload([...(e.dataTransfer?.files || [])]); });
-  _pasteTarget = doUpload;
-  const tvIn = h('input', { type: 'text', inputmode: 'url', placeholder: 'TradingView 圖表連結 https://www.tradingview.com/x/…', class: 'sm', 'aria-label': 'TradingView 連結' });
-  const addTv = () => { const v = tvIn.value.trim(); if (!v) return; if (!/^https:\/\/([a-z0-9-]+\.)*tradingview\.com\//i.test(v)) return toast('請貼 tradingview.com 的連結'); onChange(shots, [...new Set([...tvLinks, v])]); };
-  tvIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addTv(); } });
-  wrap.append(shots.length ? thumbs : null, drop,
-    tvLinks.map((u) => h('div', { class: 'tvlink' }, h('span', { class: 'badge small' }, 'TV'), h('a', { href: u, target: '_blank', rel: 'noopener noreferrer' }, u.replace(/^https:\/\/(www\.)?/, '')), h('button', { class: 'linkbtn', type: 'button', onclick: () => onChange(shots, tvLinks.filter((x) => x !== u)) }, '移除'))),
-    h('div', { class: 'addrow' }, tvIn, h('button', { class: 'btn sm', type: 'button', onclick: addTv }, '加入連結')));
+// ---------------------------------------------------------------- 盤面快照（照超人交易紀錄：小卡片＋「補上快照」視窗）
+// 角色和備註附在每筆截圖／連結字串的 # 後面（瀏覽器不會把 # 後面送到伺服器，所以圖片照常顯示，也不用改資料庫）
+ICONS.clip = '<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M9 14l2 2 4-4"/>';
+ICONS.ext = '<path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>';
+const SHOT_ROLES = ['進場前規劃', '持倉中盤面', '出場盤面', '復盤結果', '其他'];
+function shotMeta(str) {
+  const s0 = String(str || ''); const i = s0.indexOf('#xj=');
+  if (i < 0) return { base: s0, role: '', note: '' };
+  const raw = s0.slice(i + 4);
+  for (const txt of [raw, (() => { try { return decodeURIComponent(raw); } catch (_) { return ''; } })()]) {
+    try { const m = JSON.parse(txt); return { base: s0.slice(0, i), role: m.r || '', note: m.n || '' }; } catch (_) { }
+  }
+  return { base: s0.slice(0, i), role: '', note: '' };
+}
+function withMeta(base, role, note) {
+  const m = {}; if (role) m.r = role; if (note) m.n = String(note).slice(0, 120);
+  return Object.keys(m).length ? `${base}#xj=${JSON.stringify(m)}` : base;   // 伺服器每筆最多存 500 字，備註限 120 字
+}
+const tvChartUrl = (sym) => `https://www.tradingview.com/chart/?symbol=${encodeURIComponent('BINGX:' + String(sym || '').toUpperCase().replace(/[^A-Z0-9]/g, '') + '.P')}`;
+const isTvUrl = (v) => /^https:\/\/([a-z0-9-]+\.)*tradingview\.com\//i.test(String(v || '').trim());
+
+function shotEditor(shots, tvLinks, onChange, ctx = {}) {
+  const wrap = h('div', { class: 'snapcard' });
+  const items = [...shots.map((x) => ({ kind: 'img', raw: x })), ...tvLinks.map((x) => ({ kind: 'tv', raw: x }))];
+  const remove = (it) => onChange(it.kind === 'img' ? shots.filter((x) => x !== it.raw) : shots, it.kind === 'tv' ? tvLinks.filter((x) => x !== it.raw) : tvLinks);
+  const open = (files) => openShotSheet(ctx, (newShots, newTv) => onChange([...shots, ...newShots], [...new Set([...tvLinks, ...newTv])]), files);
+  if (!items.length) {
+    wrap.append(h('div', { class: 'snap-empty' }, '尚未附加盤面連結'), h('button', { class: 'btn primary snap-add', type: 'button', onclick: () => open() }, icon('plus', 18), '補上快照'));
+  } else {
+    wrap.append(h('div', { class: 'snap-list' }, items.map((it) => {
+      const m = shotMeta(it.raw);
+      const label = h('div', { class: 'snap-meta' }, h('span', { class: 'snap-role' }, m.role || '其他'), m.note ? h('span', { class: 'snap-note' }, m.note) : null);
+      const del = h('button', { class: 'snap-del', type: 'button', 'aria-label': '移除', title: '移除', onclick: (e) => { e.stopPropagation(); confirmClick(e.currentTarget, '確定？', () => remove(it)); } }, '×');
+      if (it.kind === 'img') return h('div', { class: 'snap-item' }, h('img', { src: `/journal/shot/${m.base}`, alt: '盤面截圖', loading: 'lazy', onclick: () => viewImg(`/journal/shot/${m.base}`) }), label, del);
+      return h('div', { class: 'snap-item link' }, h('a', { href: m.base, target: '_blank', rel: 'noopener noreferrer', class: 'snap-tv' }, h('span', { class: 'badge small' }, 'TV'), m.base.replace(/^https:\/\/(www\.)?/, '')), label, del);
+    })), h('button', { class: 'btn snap-add', type: 'button', onclick: () => open() }, icon('plus', 18), '再補一張'));
+  }
+  // 在詳情／編輯頁直接 Ctrl+V 截圖：自動打開視窗並放進去
+  _pasteTarget = (files) => open(files);
   return wrap;
 }
 let _pasteTarget = null;
+let _sheetPaste = null;
 document.addEventListener('paste', (e) => {
+  if (_sheetPaste) { _sheetPaste(e); return; }
   if (!_pasteTarget || !(state.drawer || state.route.page === 'edit' || state.route.page === 'new')) return;
   const files = [...(e.clipboardData?.items || [])].filter((it) => it.kind === 'file' && it.type.startsWith('image/')).map((it) => it.getAsFile());
   if (!files.length) return;
   e.preventDefault(); _pasteTarget(files);
 });
+
+function openShotSheet(ctx, onDone, initialFiles) {
+  const S = { role: ctx.status === 'closed' ? '出場盤面' : '進場前規劃', note: '', imgs: [], links: [], busy: 0, manual: false };
+  const side = ctx.side === 'short' ? 'SHORT' : 'LONG';
+  const srcName = ctx.source === 'api' ? 'BingX' : ctx.source === 'csv' ? 'CSV 匯入' : '手動紀錄';
+  const fileIn = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp,image/gif', multiple: true, hidden: true });
+  const body = h('div', { class: 'sheet-b' });
+  const doneBtn = h('button', { class: 'btn primary sheet-done', type: 'button' }, '完成附加');
+  const close = () => { _sheetPaste = null; wrapEl.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  const addFiles = async (files) => {
+    files = [...files].filter((f) => f && f.type && f.type.startsWith('image/'));
+    if (!files.length) return;
+    S.busy += files.length; draw();
+    try { const paths = await uploadFiles(files); S.imgs.push(...paths); } catch (e) { toast('上傳失敗：' + e.message); }
+    S.busy -= files.length; draw();
+  };
+  const addLink = (v) => { v = String(v || '').trim(); if (!v) return false; if (!isTvUrl(v)) { toast('請貼 tradingview.com 的連結'); return false; } if (!S.links.includes(v)) S.links.push(v); draw(); return true; };
+  const pasteFromClipboard = async () => {
+    try {
+      if (navigator.clipboard && navigator.clipboard.read) {
+        const items = await navigator.clipboard.read(); const files = [];
+        for (const it of items) { const t = it.types.find((x) => x.startsWith('image/')); if (t) files.push(new File([await it.getType(t)], 'clip.png', { type: t })); }
+        if (files.length) { addFiles(files); return; }
+      }
+      const txt = navigator.clipboard && navigator.clipboard.readText ? await navigator.clipboard.readText() : '';
+      if (txt && addLink(txt)) return;
+      toast('剪貼簿裡沒有盤面連結或截圖');
+    } catch (_) { toast('瀏覽器不讓網頁讀剪貼簿，請直接按 Ctrl+V（Mac ⌘+V）貼上'); }
+  };
+  fileIn.addEventListener('change', () => { addFiles(fileIn.files); fileIn.value = ''; });
+  _sheetPaste = (e) => {
+    const files = [...(e.clipboardData?.items || [])].filter((it) => it.kind === 'file' && it.type.startsWith('image/')).map((it) => it.getAsFile());
+    if (files.length) { e.preventDefault(); addFiles(files); return; }
+    const txt = e.clipboardData?.getData('text') || '';
+    const tgt = e.target; if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA')) return;
+    if (isTvUrl(txt)) { e.preventDefault(); addLink(txt); }
+  };
+  const manualIn = h('input', { type: 'text', inputmode: 'url', class: 'sm', placeholder: 'https://www.tradingview.com/x/…', 'aria-label': 'TradingView 快照連結' });
+  manualIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); if (addLink(manualIn.value)) manualIn.value = ''; } });
+  const noteIn = h('input', { type: 'text', class: 'sheet-note', maxlength: 120, placeholder: '最多 120 字', 'aria-label': '備註' });
+  noteIn.addEventListener('input', () => { S.note = noteIn.value; });
+
+  function draw() {
+    const has = S.imgs.length + S.links.length;
+    doneBtn.disabled = !has || S.busy > 0 || null;
+    doneBtn.textContent = S.busy ? '上傳中…' : '完成附加';
+    body.replaceChildren(
+      h('div', { class: 'sheet-info mono' }, h('b', {}, ctx.symbol || ''), ` · ${side} · ${srcName} · ${ctx.status === 'closed' ? 'CLOSED' : 'OPEN'}`),
+      h('div', { class: 'sheet-opts' },
+        h('button', { type: 'button', class: 'sheet-opt', onclick: () => fileIn.click() }, icon('image', 22), h('span', {}, '從相簿選擇')),
+        h('button', { type: 'button', class: 'sheet-opt', onclick: pasteFromClipboard }, icon('clip', 22), h('span', {}, '貼上已複製的盤面連結'))),
+      h('div', { class: 'sheet-tv' }, h('span', {}, '將開啟對應的 BingX 永續合約盤面'),
+        h('a', { href: tvChartUrl(ctx.symbol), target: '_blank', rel: 'noopener noreferrer' }, '開啟 TradingView ', icon('ext', 15))),
+      S.manual ? h('div', { class: 'addrow' }, manualIn, h('button', { class: 'btn sm', type: 'button', onclick: () => { if (addLink(manualIn.value)) manualIn.value = ''; } }, '加入'))
+        : h('button', { type: 'button', class: 'linkbtn sheet-manual', onclick: () => { S.manual = true; draw(); setTimeout(() => manualIn.focus(), 0); } }, '手動貼上 TradingView 快照連結'),
+      has || S.busy ? h('div', { class: 'sheet-picked' },
+        S.imgs.map((p) => h('div', { class: 'sheet-thumb' }, h('img', { src: `/journal/shot/${p}`, alt: '待附加的截圖' }), h('button', { type: 'button', 'aria-label': '移除', onclick: () => { S.imgs = S.imgs.filter((x) => x !== p); draw(); } }, '×'))),
+        S.links.map((u) => h('div', { class: 'sheet-link' }, h('span', { class: 'badge small' }, 'TV'), h('span', { class: 'u' }, u.replace(/^https:\/\/(www\.)?/, '')), h('button', { type: 'button', 'aria-label': '移除', onclick: () => { S.links = S.links.filter((x) => x !== u); draw(); } }, '×'))),
+        S.busy ? h('div', { class: 'sheet-thumb busy' }, '上傳中…') : null) : null,
+      h('div', { class: 'sheet-lbl' }, '快照角色'),
+      h('div', { class: 'sheet-roles' }, SHOT_ROLES.map((r) => h('button', { type: 'button', class: 'sheet-role', 'aria-pressed': String(S.role === r), onclick: () => { S.role = r; draw(); } }, r))),
+      h('div', { class: 'sheet-lbl' }, '備註（選填）'), noteIn, fileIn);
+  }
+  doneBtn.addEventListener('click', () => {
+    if (doneBtn.disabled) return;
+    onDone(S.imgs.map((p) => withMeta(p, S.role, S.note)), S.links.map((u) => withMeta(u, S.role, S.note)));
+    close();
+  });
+  const sheet = h('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': '補上盤面快照' },
+    h('div', { class: 'sheet-grip' }),
+    h('div', { class: 'sheet-h' }, h('div', {}, h('h2', {}, '補上盤面快照'), h('div', { class: 'sub' }, `${ctx.symbol || ''} · ${side}${ctx.open_time ? ' · ' + fmtSheetTime(ctx.open_time) : ''}`)),
+      h('button', { class: 'iconbtn', type: 'button', 'aria-label': '關閉', onclick: close }, icon('x'))),
+    body, h('div', { class: 'sheet-f' }, doneBtn));
+  sheet.addEventListener('dragover', (e) => { e.preventDefault(); sheet.classList.add('over'); });
+  sheet.addEventListener('dragleave', (e) => { if (e.target === sheet) sheet.classList.remove('over'); });
+  sheet.addEventListener('drop', (e) => { e.preventDefault(); sheet.classList.remove('over'); addFiles(e.dataTransfer?.files || []); });
+  const wrapEl = h('div', { class: 'sheet-wrap' }, h('div', { class: 'scrim', onclick: close }), sheet);
+  document.body.append(wrapEl); document.addEventListener('keydown', onKey);
+  draw();
+  if (initialFiles && initialFiles.length) addFiles(initialFiles);
+}
+function fmtSheetTime(iso) { const p = tw(iso); if (!p) return ''; const ap = p.hh < 12 ? '上午' : '下午'; const h12 = p.hh % 12 || 12; return `${p.m}/${p.d} ${ap}${pad(h12)}:${pad(p.mm)}`; }
 function viewImg(src) { const v = h('div', { class: 'viewer', role: 'dialog', 'aria-label': '截圖', onclick: () => v.remove() }, h('img', { src, alt: '盤面截圖' })); document.body.append(v); }
 
 // ================================================================ 交易詳情（右側）
@@ -350,7 +459,7 @@ function renderDrawer() {
       h('button', { class: 'iconbtn', type: 'button', 'aria-label': '關閉', onclick: () => { if (D.dirty && !confirm('這筆還沒儲存，要放棄修改嗎？')) return; closeDrawer(); } }, icon('x'))),
     h('div', { class: 'db' },
       h('div', { class: 'card', style: 'padding:16px 18px;display:grid;gap:16px' },
-        h('div', { class: 'dsec' }, h('div', { class: 'h' }, h('span', {}, '盤面快照', h('span', { class: 'opt' }, k.hasShot ? '已補' : '待補')), null), shotEditor(t.shots || [], t.tv_links || [], saveShots)),
+        h('div', { class: 'dsec' }, h('div', { class: 'h' }, h('span', {}, '盤面連結 / 圖表附件', h('span', { class: 'opt' }, k.hasShot ? '已補' : '待補')), null), shotEditor(t.shots || [], t.tv_links || [], saveShots, { symbol: t.symbol, side: t.side, open_time: t.open_time, status: t.status, source: t.source })),
         h('div', { class: 'dsec' }, h('div', { class: 'h' }, h('span', {}, '進場條件', h('span', { class: 'opt' }, '選填'))),
           condPicker(d.conditions, t.side, (v) => { d.conditions = v; D.dirty = true; re(); }, { search: true, query: D.q, onQuery: (q) => { D.q = q; re(); setTimeout(() => { const el = $('.drawer input[type=search]'); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }, 0); } })),
         h('div', { class: 'dsec' }, h('div', { class: 'h' }, h('span', {}, '開單時的狀態', h('span', { class: 'opt' }, '選填'))), emoPicker(d.emotions, (v) => { d.emotions = v; D.dirty = true; re(); })),
@@ -458,7 +567,7 @@ PAGES.edit = (page, params, isNew) => {
         h('div', { class: 'g2', style: 'display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px' },
           h('label', { class: 'f' }, '策略', h('select', { onchange: (e) => { f.setup = e.target.value; persist(); } }, h('option', { value: '' }, '未分類'), [...new Set([...(state.settings.setups || []), f.setup].filter(Boolean))].map((x) => h('option', { value: x, selected: f.setup === x || null }, x)))),
           h('label', { class: 'f' }, '下單方式', h('select', { onchange: (e) => { f.order_type = e.target.value; persist(); } }, [['limit', '掛單'], ['market', '市價']].map(([v, l]) => h('option', { value: v, selected: f.order_type === v || null }, l))))),
-        h('div', { class: 'dsec' }, h('div', { class: 'h' }, '盤面快照'), shotEditor(f.shots || [], f.tv_links || [], (sh, tv) => { f.shots = sh; f.tv_links = tv; re(); })),
+        h('div', { class: 'dsec' }, h('div', { class: 'h' }, '盤面連結 / 圖表附件'), shotEditor(f.shots || [], f.tv_links || [], (sh, tv) => { f.shots = sh; f.tv_links = tv; re(); }, { symbol: f.symbol, side: f.side, open_time: f.open_time, status: f.status, source: f.source })),
         h('div', { class: 'dsec' }, h('div', { class: 'h' }, '這筆有照規則嗎？'), h('div', { class: 'seg boxed', role: 'group' }, [[true, '有'], [false, '沒有']].map(([v, l]) => h('button', { type: 'button', 'aria-pressed': String(f.followed_rules === v), onclick: () => { f.followed_rules = v; re(); } }, l))), f.followed_rules === false ? ruleIn : null),
         h('div', { class: 'dsec' }, h('div', { class: 'h' }, h('span', {}, '犯了什麼錯', h('span', { class: 'opt' }, '沒有就不用選'))), h('div', { class: 'tagbox' }, (state.settings.mistakes || []).map((m) => h('button', { type: 'button', class: 'tag', 'aria-pressed': String((f.mistakes || []).includes(m)), onclick: () => { const st = new Set(f.mistakes || []); st.has(m) ? st.delete(m) : st.add(m); f.mistakes = [...st]; re(); } }, m)))),
         h('label', { class: 'f' }, '進場理由', reasonIn),
