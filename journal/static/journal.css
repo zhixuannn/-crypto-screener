@@ -582,3 +582,12 @@ pre.raw { background: var(--surface-2); border: 1px solid var(--line); border-ra
 .sheet-done { width: 100%; height: 48px; font-size: 16px; justify-content: center; }
 .sheet-done[disabled] { opacity: .45; cursor: not-allowed; }
 @media (max-width: 640px) { .sheet-opts { gap: 8px; } .sheet-opt { padding: 12px; font-size: 14px; } .sheet-b, .sheet-h, .sheet-f { padding-left: 16px; padding-right: 16px; } }
+/* 電腦螢幕：視窗放在畫面正中間，不要貼在最下面 */
+@media (min-width: 641px) {
+  .sheet-wrap { align-items: center; padding: 24px; }
+  .sheet { width: min(760px, 100%); max-height: calc(100vh - 48px); border-radius: 18px; animation: sheetPop .18s ease-out; }
+  .sheet-grip { display: none; }
+  .sheet-h { padding-top: 18px; }
+  .sheet-f { padding-bottom: 16px; border-radius: 0 0 18px 18px; }
+}
+@keyframes sheetPop { from { transform: translateY(12px) scale(.98); opacity: .6; } to { transform: none; opacity: 1; } }
