@@ -15,7 +15,7 @@ from flask import (Blueprint, render_template, request, jsonify, session, redire
                    send_file, Response, abort)
 
 from .store import get_store, USER_FIELDS, EXCHANGE_FIELDS, JSON_LIST_FIELDS, StoreError, now_iso, guess_ext
-from . import bingx_sync
+from . import bingx_sync, notify
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +69,7 @@ def _password():
 def login_required(fn):
     @wraps(fn)
     def wrapper(*a, **kw):
-        if not session.get('journal_ok'):
+        if not session.get('journal_ok') or int(session.get('journal_ver') or 0) != notify.session_ver():
             if request.path.startswith('/journal/api/'):
                 return jsonify({'error': 'login_required'}), 401
             return redirect(url_for('journal.login', next=request.path))
@@ -98,9 +98,10 @@ def login():
         fails = [t for t in _login_fail.get(ip, []) if time.time() - t < 600]
         if len(fails) >= 8:
             error = '嘗試太多次，請 10 分鐘後再試'
-        elif hmac.compare_digest(request.form.get('password', ''), _password()):
+        elif notify.check_password(request.form.get('password', '')):
             session.permanent = True
             session['journal_ok'] = True
+            session['journal_ver'] = notify.session_ver()
             _login_fail.pop(ip, None)
             nxt = request.args.get('next') or url_for('journal.app_page')
             if not nxt.startswith('/journal'):
@@ -162,6 +163,7 @@ def api_bootstrap():
     f_reviews = _pool.submit(store.list_reviews)
     f_settings = _pool.submit(_settings)
     f_sync = _pool.submit(_sync_status)
+    f_extra = _pool.submit(lambda: {'notify': notify.public_cfg(), 'last_backup': notify.last_backup(), 'auth': notify.auth_info()})
     sync = f_sync.result()
     try:
         last = sync.get('last_end_ms')
@@ -177,7 +179,22 @@ def api_bootstrap():
         'sync': sync,
         'store': store.kind,
         'ai': bool(os.environ.get('ANTHROPIC_API_KEY')),
+        'about': _about(store),
+        **f_extra.result(),
     })
+
+
+APP_VERSION = '1.2.0'
+
+
+def _about(store):
+    v = _asset_version()
+    try:
+        updated = datetime.datetime.fromtimestamp(int(v), notify.TW).isoformat(timespec='minutes')
+    except (ValueError, OSError):
+        updated = None
+    return {'version': APP_VERSION, 'commit': (os.environ.get('RENDER_GIT_COMMIT') or '')[:7] or None,
+            'updated': updated, 'store': store.kind}
 
 
 @bp.route('/api/debug-bingx')
@@ -399,17 +416,54 @@ def shot(p):
 @bp.route('/api/export.csv')
 @login_required
 def api_export():
-    trades = [t for t in get_store().list_trades(exclude_source='paper') if not t.get('deleted_at')]
-    cols = ['open_time', 'close_time', 'symbol', 'side', 'status', 'source', 'setup', 'order_type', 'entry', 'exit',
-            'qty', 'leverage', 'sl', 'risk_amount', 'pnl', 'fee', 'conditions', 'emotions', 'mistakes',
-            'followed_rules', 'reason', 'note', 'tv_links']
-    buf = io.StringIO()
-    w = csv.writer(buf)
-    w.writerow(cols)
-    for t in sorted(trades, key=lambda x: x.get('open_time') or ''):
-        w.writerow(['|'.join(map(str, t.get(c) or [])) if c in JSON_LIST_FIELDS else ('' if t.get(c) is None else t.get(c)) for c in cols])
-    return Response('﻿' + buf.getvalue(), mimetype='text/csv',
+    text, _n = notify.trades_csv()
+    return Response(text, mimetype='text/csv',
                     headers={'Content-Disposition': f'attachment; filename=journal_{datetime.date.today()}.csv'})
+
+
+@bp.route('/api/notify', methods=['GET', 'PUT'])
+@login_required
+def api_notify():
+    if request.method == 'PUT':
+        return jsonify(notify.save_cfg(request.json or {}))
+    return jsonify(notify.public_cfg())
+
+
+@bp.route('/api/notify/test', methods=['POST'])
+@login_required
+def api_notify_test():
+    if not notify.telegram_ready():
+        return _err('伺服器還沒設定 TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID')
+    ok = notify.send('這是一則測試通知，看到就代表日誌的通知設定好了 👍')
+    return jsonify({'ok': ok}) if ok else _err('Telegram 沒有收到，請檢查機器人設定', 502)
+
+
+@bp.route('/api/backup-email', methods=['POST'])
+@login_required
+def api_backup_email():
+    body = request.json or {}
+    to = (body.get('to') or notify.get_cfg().get('email_to') or '').strip()
+    if body.get('to') is not None:
+        notify.save_cfg({'email_to': to})
+    ok, msg = notify.send_backup(to)
+    return jsonify({'ok': True, 'message': msg, 'last_backup': notify.last_backup()}) if ok else _err(msg, 502)
+
+
+@bp.route('/api/password', methods=['POST'])
+@login_required
+def api_password():
+    body = request.json or {}
+    ip = request.headers.get('X-Forwarded-For', request.remote_addr or '').split(',')[0].strip()
+    fails = [t for t in _login_fail.get('pw:' + ip, []) if time.time() - t < 600]
+    if len(fails) >= 5:
+        return _err('嘗試太多次，請 10 分鐘後再試', 429)
+    ok, res = notify.change_password(body.get('old', ''), body.get('new', ''))
+    if not ok:
+        if res == '目前的密碼不對':
+            _login_fail['pw:' + ip] = fails + [time.time()]
+        return _err(res)
+    session['journal_ver'] = res   # 這台繼續登入，其他裝置會被登出
+    return jsonify({'ok': True, 'auth': notify.auth_info()})
 
 
 @bp.route('/api/ai', methods=['POST'])
