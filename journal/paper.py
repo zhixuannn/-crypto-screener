@@ -156,7 +156,10 @@ def settle_open():
             for t, upd in pool.map(lambda x: _safe(one, x), opens):
                 if upd:
                     store.update_trade(t['id'], upd)
-                    closed += 1 if upd.get('status') == 'closed' else 0
+                    if upd.get('status') == 'closed':
+                        closed += 1
+                        from . import notify
+                        notify.paper_closed(t, upd)
         if closed:
             logger.info(f'[紙上] 結算 {closed} 筆（持倉中 {len(opens) - closed} 筆）')
         return {'open': len(opens) - closed, 'closed': closed}
