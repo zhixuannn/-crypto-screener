@@ -388,7 +388,7 @@ function pollSync() {
 }
 async function reload() {
   const d = await api('GET', '/bootstrap');
-  state.trades = d.trades; state.reviews = d.reviews; state.settings = d.settings; state.defaults = d.defaults || {}; state.sync = d.sync; state.store = d.store; state.ai = d.ai; state.loaded = true;
+  state.trades = d.trades; state.reviews = d.reviews; state.settings = d.settings; state.defaults = d.defaults || {}; state.sync = d.sync; state.store = d.store; state.ai = d.ai; state.notify = d.notify || {}; state.about = d.about || {}; state.lastBackup = d.last_backup || null; state.auth = d.auth || {}; state.loaded = true;
   render();
   if (state.drawer) renderDrawer();
   if (d.sync.running) pollSync();
