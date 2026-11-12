@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 def init_app(app, scheduler=None):
     from .routes import bp
-    from . import bingx_sync, paper
+    from . import bingx_sync, paper, notify
 
     if not app.secret_key:
         secret = os.environ.get('FLASK_SECRET_KEY') or hashlib.sha256(
@@ -39,3 +39,5 @@ def init_app(app, scheduler=None):
         scheduler.add_job(paper.settle_open, 'interval', minutes=5, id='journal_paper_settle',
                           replace_existing=True, max_instances=1, coalesce=True)
         logger.info('[日誌] 紙上驗證結算排程已啟動，每 5 分鐘一次')
+        scheduler.add_job(notify.tick, 'interval', minutes=5, id='journal_notify_tick',
+                          replace_existing=True, max_instances=1, coalesce=True)
