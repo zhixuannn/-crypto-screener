@@ -396,6 +396,11 @@ def run_sync(full=False):
             store.put_kv('sync', st)
         except Exception:
             logger.exception('[日誌] 寫入同步狀態失敗')
+        try:
+            from . import notify
+            notify.sync_failed(st['error'])
+        except Exception:
+            logger.exception('[日誌] 同步失敗通知出錯')
         return st
     finally:
         _finish()
