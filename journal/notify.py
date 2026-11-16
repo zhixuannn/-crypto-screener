@@ -122,7 +122,7 @@ def paper_closed(t, upd):
         entry, sl = float(t['entry']), float(t['sl'])
         R = (float(upd['exit']) - entry) / abs(entry - sl) * (1 if t['side'] == 'long' else -1)
         side = '做多' if t['side'] == 'long' else '做空'
-        origin = 'TV 警報' if (t.get('raw') or {}).get('origin') == 'tv' else '網站掃描'
+        origin = {'tv': 'TV 警報', 'liq': '流動性 · TV 警報'}.get((t.get('raw') or {}).get('origin'), '網站掃描')
         send(f"紙上驗證{'✅ 止盈' if win else '❌ 停損'}\n{t['symbol']} {side}（{origin}）\n"
              f"結果：{R:+.2f}R，{float(upd.get('pnl') or 0):+.2f} U")
     except Exception:
