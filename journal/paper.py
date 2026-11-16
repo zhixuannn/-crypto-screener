@@ -19,7 +19,7 @@ from .store import get_store, now_iso
 logger = logging.getLogger(__name__)
 
 PAPER_RISK = float(os.environ.get('PAPER_RISK_U', '10'))
-ORIGIN_NAME = {'site': '網站掃描', 'tv': 'TV 警報'}
+ORIGIN_NAME = {'site': '網站掃描', 'tv': 'TV 警報', 'liq': '流動性 TV 警報'}
 TF_MS = {'1m': 60_000, '3m': 180_000, '5m': 300_000, '15m': 900_000, '30m': 1_800_000, '1h': 3_600_000, '4h': 14_400_000}
 
 _settle_lock = threading.Lock()
@@ -101,6 +101,41 @@ def record_signal(symbol, direction, entry, sl, tp, candle_time, timeframe, orig
         except Exception:
             logger.exception('[紙上] 記錄訊號失敗')
     threading.Thread(target=run, daemon=True).start()
+
+
+# ---------------------------------------------------------------- 流動性策略（TradingView 警報）
+def _record_liquidity(symbol, direction, entry, sl, tp1, candle_time, timeframe):
+    store = get_store()
+    if not entry or not sl or entry == sl:
+        return None
+    if (direction == 'long' and sl >= entry) or (direction == 'short' and sl <= entry):
+        return None
+    jsym = _journal_symbol(symbol)
+    ext = f'paper:liq:{jsym}:{timeframe}:{direction}:{int(candle_time)}'
+    with _write_lock:
+        if store.find_by_external(ext):
+            return None
+        side_word = '做多' if direction == 'long' else '做空'
+        open_ms = int(candle_time) + TF_MS.get(timeframe, 300_000)   # 訊號那根收盤時進場
+        # 張數不限：同一個幣可以同時有好幾張流動性紙上單
+        row = store.insert_trade({
+            'source': 'paper', 'external_id': ext, 'symbol': jsym, 'side': direction, 'status': 'open',
+            'open_time': _iso(open_ms), 'entry': float(entry), 'sl': float(sl), 'tps': [float(tp1)] if tp1 else [],
+            'qty': PAPER_RISK / abs(entry - sl), 'risk_amount': PAPER_RISK, 'setup': '流動性 · TV 警報',
+            'order_type': 'market', 'conditions': [f'流動性{side_word}', f'{timeframe} 訊號'],
+            'raw': {'ccxt_symbol': symbol, 'tf': timeframe, 'origin': 'liq', 'candle_time': int(candle_time)},
+        })
+    logger.info(f'[紙上] 新增流動性 {jsym} {direction} {timeframe} @ {entry}')
+    return row
+
+
+def record_liquidity(symbol, direction, entry, sl, tp1, candle_time, timeframe):
+    """TradingView 流動性警報呼叫這個；回傳是否新增成功（重複的會略過）。"""
+    try:
+        return _record_liquidity(symbol, direction, entry, sl, tp1, candle_time, timeframe) is not None
+    except Exception:
+        logger.exception('[紙上] 記錄流動性訊號失敗')
+        return False
 
 
 # ---------------------------------------------------------------- 結算
