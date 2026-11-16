@@ -541,6 +541,47 @@ def webhook_tv():
     return jsonify({'ok': True}), 200
 
 
+def handle_liq_alert(symbol, timeframe, direction, entry, sl, tp1, candle_time):
+    """流動性策略：TradingView 已經算好進場／停損／止盈，直接記成紙上單＋發 Telegram。"""
+    try:
+        import journal.paper as _paper
+        added = _paper.record_liquidity(symbol, direction, entry, sl, tp1, candle_time, timeframe)
+        if added:
+            msg = notifier.format_signal_message(symbol, direction, entry, sl, tp1, timeframe,
+                                                 strategy_label='流動性策略', source='tv')
+            notifier.send_telegram_message(msg)
+    except Exception as e:
+        logger.warning(f'[流動性警報] 處理 {symbol} 失敗: {e}')
+
+
+@app.route('/webhook/tv-liq', methods=['POST'])
+def webhook_tv_liq():
+    """
+    TradingView「XUAN 流動性」指標的 alert() 訊息（JSON），網址：/webhook/tv-liq?key=你的密碼
+    {"strategy":"liquidity","symbol":"BINGX:BTCUSDT.P","tf":"5","dir":"long","entry":74000,"sl":73500,"tp1":74500,"time":1762900000000}
+    """
+    if not TV_WEBHOOK_SECRET:
+        return jsonify({'ok': False, 'error': 'server secret not configured'}), 503
+    data = request.get_json(force=True, silent=True) or {}
+    given = str(request.args.get('key') or data.get('secret') or '')
+    if not hmac.compare_digest(given.encode(), TV_WEBHOOK_SECRET.encode()):
+        return jsonify({'ok': False, 'error': 'unauthorized'}), 401
+    symbol = normalize_tv_symbol(data.get('symbol'))
+    timeframe = normalize_tv_timeframe(data.get('tf'))
+    direction = str(data.get('dir', '')).lower()
+    try:
+        entry, sl, tp1 = float(data.get('entry')), float(data.get('sl')), float(data.get('tp1'))
+        candle_time = int(float(data.get('time')))
+    except (TypeError, ValueError):
+        return jsonify({'ok': False, 'error': 'bad numbers'}), 400
+    if not symbol or not timeframe or direction not in ('long', 'short'):
+        return jsonify({'ok': False, 'error': 'bad payload'}), 400
+    if (direction == 'long' and not sl < entry < tp1) or (direction == 'short' and not tp1 < entry < sl):
+        return jsonify({'ok': False, 'error': 'sl/tp on wrong side'}), 400
+    _tv_pool.submit(handle_liq_alert, symbol, timeframe, direction, entry, sl, tp1, candle_time)
+    return jsonify({'ok': True}), 200
+
+
 @app.route('/api/tv-alerts')
 def api_tv_alerts():
     """最近收到的 TV 警報，以及網站有沒有對上 (用來檢查兩邊判斷是否一致)。"""
