@@ -318,10 +318,11 @@ function shotEditor(shots, tvLinks, onChange, ctx = {}) {
       const del = h('button', { class: 'snap-del', type: 'button', 'aria-label': '移除', title: '移除', onclick: (e) => { e.stopPropagation(); confirmClick(e.currentTarget, '確定？', () => remove(it)); } }, '×');
       if (it.kind === 'img') return h('div', { class: 'snap-item' }, h('img', { src: `/journal/shot/${m.base}`, alt: '盤面截圖', loading: 'lazy', onclick: () => viewImg(`/journal/shot/${m.base}`) }), label, del);
       return h('div', { class: 'snap-item link' }, h('a', { href: m.base, target: '_blank', rel: 'noopener noreferrer', class: 'snap-tv' }, h('span', { class: 'badge small' }, 'TV'), m.base.replace(/^https:\/\/(www\.)?/, '')), label, del);
-    })), h('button', { class: 'btn snap-add', type: 'button', onclick: () => open() }, icon('plus', 18), '再補一張'));
+    })), ctx.headerAdd ? null : h('button', { class: 'btn snap-add', type: 'button', onclick: () => open() }, icon('plus', 18), '再補一張'));
   }
   // 在詳情／編輯頁直接 Ctrl+V 截圖：自動打開視窗並放進去
   _pasteTarget = (files) => open(files);
+  wrap._open = () => open();
   return wrap;
 }
 let _pasteTarget = null;
@@ -430,7 +431,7 @@ function renderDrawer() {
   const D = state.drawer; if (!D) return;
   const t = state.trades.find((x) => x.id === D.id); if (!t) { closeDrawer(); return; }
   const k = calc(t); const d = D.d;
-  const layer = $('#layer'); const keepScroll = layer.querySelector('.db')?.scrollTop || 0;
+  const layer = $('#layer'); const keepScroll = layer.querySelector(`.drawer[data-id="${D.id}"] .db`)?.scrollTop || 0;
   const idx = D.nav.indexOf(D.id);
   const move = (dir) => { const nid = D.nav[idx + dir]; if (!nid) return; if (D.dirty && !confirm('這筆還沒儲存，要放棄修改嗎？')) return; openDrawer(nid, D.nav); };
   const mark = () => { D.dirty = true; saveBtn.disabled = false; };
@@ -450,30 +451,55 @@ function renderDrawer() {
   const saveShots = async (shots, tv) => { try { const nt = await api('PATCH', `/trades/${t.id}`, { shots, tv_links: tv }); replaceTrade(nt); render(); renderDrawer(); toast('截圖已儲存'); } catch (e) { toast(e.message); } };
 
   const raw = t.raw && t.raw.symbol ? `BingX raw: ${t.raw.symbol}` : (t.source === 'api' ? 'BingX' : t.source === 'csv' ? 'CSV 匯入' : '手動紀錄');
-  const drawer = h('div', { class: 'drawer', role: 'dialog', 'aria-modal': 'true', 'aria-label': `${t.symbol} 交易詳情` },
+  const md = (iso) => { const p = tw(iso); return p ? `${pad(p.m)}/${pad(p.d)} ${pad(p.hh)}:${pad(p.mm)}` : '—'; };
+  // 1. 大字盈虧 + R
+  const rLine = fin(k.R) ? h('div', { class: 'rl ' + cls(k.R) }, fmtR(k.R))
+    : k.isOpen ? h('div', { class: 'rl muted' }, '持倉中 · 未實現盈虧')
+    : h('div', { class: 'rl amber' }, k.needR ? '缺止損價，未計入 R 統計' : '未計入 R 統計');
+  const hero = h('div', { class: 'dhero' }, h('div', { class: 'pnl ' + cls(k.pnl) }, fin(k.pnl) ? fmtU(k.pnl) : '—'), rLine);
+  // 2. 價格
+  const prices = h('div', { class: 'dsec' }, h('div', { class: 'h' }, '價格'), h('div', { class: 'kv' },
+    kvRow('進場價', fmt(k.entry, 8)), kvRow('止損價', fin(k.sl) ? fmt(k.sl, 8) : '—'), kvRow(k.isOpen ? '標記價格' : '出場價', fmt(k.exit, 8)),
+    kvRow('進場時間', md(t.open_time)), kvRow('出場時間', k.isOpen ? '持倉中' : md(t.close_time))));
+  // 3. 行為（有填才出現）
+  const conds = t.conditions || [], emos = t.emotions || [];
+  const condTag = (n) => { const c = condList().find((x) => x.name === n) || { color: t.side === 'short' ? 'red' : 'green' };
+    return h('span', { class: 'tag ro', style: `--tc:${COLOR_VAR[c.color] || COLOR_VAR.gray}` }, n); };
+  const emoTag = (n) => { const e = emoList().find((x) => x.name === n) || {}; return h('span', { class: 'tag ro tone-' + (e.tone || 'none') }, n); };
+  const behave = conds.length || emos.length || t.note ? h('div', { class: 'dsec' }, h('div', { class: 'h' }, '行為'),
+    conds.length ? h('div', { class: 'tagbox' }, conds.map(condTag)) : null,
+    emos.length ? h('div', { class: 'tagbox', style: 'align-items:center' }, h('span', { class: 'muted', style: 'font-size:14px' }, '情緒:'), emos.map(emoTag)) : null,
+    t.note ? h('div', { class: 'dnote' }, t.note) : null) : null;
+  // 4. 盤面連結 / 圖表附件（有快照時右上角「新增快照」）
+  const hasItems = (t.shots || []).length + (t.tv_links || []).length > 0;
+  const shotBox = shotEditor(t.shots || [], t.tv_links || [], saveShots, { symbol: t.symbol, side: t.side, open_time: t.open_time, status: t.status, source: t.source, headerAdd: hasItems });
+  const shotsSec = h('div', { class: 'dsec' }, h('div', { class: 'h' }, h('span', {}, '盤面連結 / 圖表附件'),
+    hasItems ? h('button', { class: 'btn sm', type: 'button', onclick: () => shotBox._open() }, icon('plus', 16), '新增快照') : null), shotBox);
+  // 5. 交易補完 n/3（缺進場條件、開單時的狀態、原始止損價才出現）
+  const missing = [!k.hasCond && '進場條件', !k.hasEmo && '開單時的狀態', k.needR && '原始止損價'].filter(Boolean);
+  const fixCard = missing.length ? h('div', { class: 'fixcard' },
+    h('div', { class: 'fixhead' }, h('b', {}, `交易補完 ${3 - missing.length}/3`), k.needR ? h('span', { class: 'amber' }, '未計 R') : null),
+    h('div', { class: 'fixmiss' }, `尚缺：${missing.join('、')}`),
+    h('div', { class: 'dsec' }, h('div', { class: 'h' }, h('span', {}, '進場條件')),
+      condPicker(d.conditions, t.side, (v) => { d.conditions = v; D.dirty = true; re(); }, { search: true, query: D.q, onQuery: (q) => { D.q = q; re(); setTimeout(() => { const el = $('.drawer input[type=search]'); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }, 0); } })),
+    h('div', { class: 'dsec' }, h('div', { class: 'h' }, h('span', {}, '開單時的狀態')), emoPicker(d.emotions, (v) => { d.emotions = v; D.dirty = true; re(); })),
+    h('label', { class: 'f' }, '原始止損價', slIn, h('span', { class: 'hint' }, '原始止損價用於計算 R。')),
+    h('label', { class: 'f' }, '風險金額 U（選填）', riskIn, h('span', { class: 'hint' }, t.source === 'api' ? '風險金額為選填，API 真實盈虧仍以 BingX 為準。' : '手動單沒有數量，請填風險金額才能算 R。')),
+    h('label', { class: 'f' }, '備註（選填）', noteIn),
+    h('div', { class: 'fixsave' }, saveBtn)) : null;
+  // 6. 資料
+  const info = h('div', { class: 'dsec' }, h('div', { class: 'h' }, '資料'), h('div', { class: 'kv' },
+    kvRow('來源', t.source === 'api' ? 'BingX 自動匯入' : t.source === 'csv' ? 'CSV 匯入' : '手動'),
+    t.leverage != null ? kvRow('槓桿', `${fmt(k.lev)}x`) : null, t.fee != null ? kvRow('手續費', fmt(t.fee, 6)) : null));
+
+  const drawer = h('div', { class: 'drawer', 'data-id': D.id, role: 'dialog', 'aria-modal': 'true', 'aria-label': `${t.symbol} 交易詳情` },
     h('div', { class: 'dh' }, coin(t.symbol, true),
       h('div', { class: 't' }, h('div', { class: 'l1' }, h('b', {}, t.symbol), h('span', { class: t.side === 'short' ? 'side-s' : 'side-l' }, t.side === 'short' ? '做空' : '做多')),
         h('div', { class: 'st' + (k.pending ? '' : ' ok') }, `${k.isOpen ? '持倉中' : '已平倉'} · ${k.pending ? '待補完' : '已補完'}`), h('div', { class: 'raw' }, raw)),
       h('button', { class: 'iconbtn', type: 'button', 'aria-label': '上一筆', disabled: idx <= 0 || null, onclick: () => move(-1) }, icon('up')),
       h('button', { class: 'iconbtn', type: 'button', 'aria-label': '下一筆', disabled: idx < 0 || idx >= D.nav.length - 1 || null, onclick: () => move(1) }, icon('down')),
       h('button', { class: 'iconbtn', type: 'button', 'aria-label': '關閉', onclick: () => { if (D.dirty && !confirm('這筆還沒儲存，要放棄修改嗎？')) return; closeDrawer(); } }, icon('x'))),
-    h('div', { class: 'db' },
-      h('div', { class: 'card', style: 'padding:16px 18px;display:grid;gap:16px' },
-        h('div', { class: 'dsec' }, h('div', { class: 'h' }, h('span', {}, '盤面連結 / 圖表附件', h('span', { class: 'opt' }, k.hasShot ? '已補' : '待補')), null), shotEditor(t.shots || [], t.tv_links || [], saveShots, { symbol: t.symbol, side: t.side, open_time: t.open_time, status: t.status, source: t.source })),
-        h('div', { class: 'dsec' }, h('div', { class: 'h' }, h('span', {}, '進場條件', h('span', { class: 'opt' }, '選填'))),
-          condPicker(d.conditions, t.side, (v) => { d.conditions = v; D.dirty = true; re(); }, { search: true, query: D.q, onQuery: (q) => { D.q = q; re(); setTimeout(() => { const el = $('.drawer input[type=search]'); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }, 0); } })),
-        h('div', { class: 'dsec' }, h('div', { class: 'h' }, h('span', {}, '開單時的狀態', h('span', { class: 'opt' }, '選填'))), emoPicker(d.emotions, (v) => { d.emotions = v; D.dirty = true; re(); })),
-        h('label', { class: 'f' }, '原始止損價', slIn, h('span', { class: 'hint' }, '原始止損價用於計算 R。')),
-        h('label', { class: 'f' }, '風險金額 U（選填）', riskIn, h('span', { class: 'hint' }, t.source === 'api' ? '沒填就用止損距離 × 數量自動算；真實盈虧仍以 BingX 為準。' : '手動單沒有數量，請填風險金額才能算 R。')),
-        h('label', { class: 'f' }, '備註（選填）', noteIn),
-        saveBtn),
-      h('div', { class: 'dsec' }, h('div', { class: 'h' }, '資料'),
-        h('div', { class: 'kv' },
-          kvRow('來源', t.source === 'api' ? 'BingX 自動匯入' : t.source === 'csv' ? 'CSV 匯入' : '手動'),
-          kvRow('開倉時間', fmtDTY(t.open_time)), kvRow('平倉時間', k.isOpen ? '持倉中' : fmtDTY(t.close_time)), kvRow('持倉時間', fmtHold(k.holdMin)),
-          kvRow('進場價', fmt(k.entry, 8)), kvRow(k.isOpen ? '標記價格' : '出場價', fmt(k.exit, 8)), t.qty != null ? kvRow('數量', fmt(k.qty, 8)) : null,
-          kvRow(k.isOpen ? '未實現盈虧' : '實際盈虧', fmtU(k.pnl, 4), cls(k.pnl)), kvRow('R', fmtR(k.R), cls(k.R)), kvRow('停損距離', fmtPct(k.stopPct, 2)),
-          t.leverage != null ? kvRow('槓桿', `${fmt(k.lev)}x`) : null, t.fee != null ? kvRow('手續費', fmt(t.fee, 6)) : null, t.funding != null ? kvRow('資金費', fmt(t.funding, 6)) : null))),
+    h('div', { class: 'db' }, hero, prices, behave, shotsSec, fixCard, info),
     h('div', { class: 'df' }, h('a', { class: 'btn', href: `#/edit/${t.id}` }, icon('edit', 17), '編輯'), h('span', { class: 'spacer' }),
       h('button', { class: 'btn ghost danger', type: 'button', onclick: (e) => confirmClick(e.currentTarget, '再按一次刪除', async () => { try { replaceTrade(await api('DELETE', `/trades/${t.id}`)); toast('已移到已刪除紀錄'); closeDrawer(); render(); } catch (er) { toast(er.message); } }) }, icon('trash', 17), '刪除')));
   layer.replaceChildren(h('div', { class: 'scrim', onclick: () => { if (D.dirty && !confirm('這筆還沒儲存，要放棄修改嗎？')) return; closeDrawer(); } }), drawer);
