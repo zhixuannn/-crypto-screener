@@ -10,7 +10,7 @@ PAGES.overview = (page) => {
   const st = state.settings;
   page.append(h('div', { class: 'ph greet' },
     h('div', {}, h('h1', {}, `${greet}${st.displayName ? '，' + st.displayName : ''}`), h('div', { class: 'sub' }, st.tagline || '')),
-    h('div', { class: 'actions' }, syncButton())));
+    h('div', { class: 'actions' }, signalButton(), syncButton())));
   const pb = pendingBanner(); if (pb) page.append(pb);
   if (!live().length) { page.append(emptyStart()); return; }
 
