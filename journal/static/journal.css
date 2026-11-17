@@ -624,3 +624,19 @@ a.st-row:hover { background: var(--surface-2); }
   .st-tx small { white-space: normal; }
   .st-row .st-theme { margin-left: 54px; }
 }
+
+/* ---- 交易詳情側欄（照超人：大字盈虧 → 價格 → 行為 → 盤面 → 交易補完 → 資料） ---- */
+.dhero { display: grid; gap: 6px; padding: 2px 0 4px; }
+.dhero .pnl { font-family: var(--mono); font-size: 34px; font-weight: 700; letter-spacing: -.5px; line-height: 1.1; }
+.dhero .rl { font-size: 14.5px; font-family: var(--mono); }
+.dhero .rl.amber, .dhero .rl.muted { font-family: inherit; }
+.tag.ro { cursor: default; --tc: var(--c-gray); border-color: color-mix(in srgb, var(--tc) 30%, var(--line)); background: color-mix(in srgb, var(--tc) 9%, var(--surface)); color: var(--ink); }
+.tag.ro.tone-none, .tag.ro.tone-good, .tag.ro.tone-warn, .tag.ro.tone-bad { border-color: var(--line); }
+.dnote { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--ink); padding: 14px 16px; font-size: 15px; white-space: pre-wrap; word-break: break-word; }
+.dsec > .h .btn.sm { font-weight: 500; }
+.fixcard { border: 1px solid var(--line); border-radius: 16px; background: var(--surface); padding: 18px 18px 0; display: grid; gap: 16px; }
+.fixhead { display: flex; justify-content: space-between; align-items: baseline; }
+.fixhead b { color: var(--amber); font-size: 15px; }
+.fixhead span { font-size: 13.5px; }
+.fixmiss { font-size: 13.5px; color: var(--ink-2); margin-top: -8px; }
+.fixsave { position: sticky; bottom: 0; margin: 0 -18px; padding: 12px 18px 16px; background: linear-gradient(to bottom, color-mix(in srgb, var(--surface) 0%, transparent), var(--surface) 14px); border-radius: 0 0 16px 16px; }
