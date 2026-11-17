@@ -51,6 +51,8 @@
         .sidebar .sub { color: var(--text-dim); font-size: 11px; margin: 0 0 24px; padding: 0 8px 0 26px; }
         .nav-item { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: none; border: 1px solid transparent; color: var(--text-dim); font-size: 14px; font-family: inherit; padding: 10px 12px; border-radius: 8px; cursor: pointer; margin-bottom: 4px; transition: all 0.15s; }
         .nav-item .ico { width: 16px; text-align: center; }
+        a.nav-item { text-decoration: none; box-sizing: border-box; }
+        .nav-item.journal-link { margin-top: 14px; border-color: var(--border); }
         .nav-item.active { color: var(--cyan); background: rgba(25, 227, 255, 0.08); border-color: rgba(25, 227, 255, 0.35); box-shadow: 0 0 14px rgba(25, 227, 255, 0.12); }
         .nav-item:hover:not(.active) { color: var(--text); background: var(--panel-alt); }
 
@@ -257,6 +259,7 @@
             .brand { margin: 0; }
             .sidebar .sub { display: none; }
             .nav-item { width: auto; margin: 0; }
+            .nav-item.journal-link { margin: 0 0 0 auto; }
             .main { padding: 16px 14px 60px; }
             .two-col { grid-template-columns: 1fr; }
             .filter-input { width: 100%; }
@@ -273,6 +276,7 @@
             <div class="sub">週期 {{ timeframe }}</div>
             <button class="nav-item active" data-page="overview"><span class="ico">◈</span>總覽</button>
             <button class="nav-item" data-page="stats"><span class="ico">▤</span>統計</button>
+            <a class="nav-item journal-link" href="/journal/"><span class="ico">✎</span>交易日誌</a>
         </div>
     </div>
 
@@ -365,7 +369,7 @@
             }
         } catch (e) {}
 
-        var navItems = document.querySelectorAll('.nav-item');
+        var navItems = document.querySelectorAll('.nav-item[data-page]');
         for (var n = 0; n < navItems.length; n++) {
             navItems[n].addEventListener('click', function() {
                 for (var m = 0; m < navItems.length; m++) navItems[m].classList.remove('active');
