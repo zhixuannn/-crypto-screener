@@ -34,6 +34,7 @@ function s(tag, attrs, ...kids) {
   return el;
 }
 const ICONS = {
+  signal: '<path d="M4 18v-3"/><path d="M9 18v-7"/><path d="M14 18v-11"/><path d="M19 18v-14"/>',
   overview: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
   trades: '<path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3z"/><path d="M13.5 6.5l3 3"/><path d="M4 4h7"/><path d="M4 8h4"/>',
   calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 17h.01M12 17h.01"/>',
@@ -334,6 +335,7 @@ function renderNav() {
   const nav = $('#nav'); nav.replaceChildren();
   const cur = state.route.page === 'edit' || state.route.page === 'new' ? 'trades' : state.route.page;
   for (const [k, l] of NAV) nav.append(h('a', { href: `#/${k}`, 'aria-current': cur === k ? 'page' : null }, icon(k === 'api' ? 'api' : k, 21), l));
+  nav.append(signalLink(21));
   nav.append(h('a', { href: '#/new', class: 'new-btn' }, icon('plus', 18), '新增交易'));
   $('#meName').textContent = state.settings.displayName || '';
 }
@@ -364,6 +366,10 @@ function pageHead(eyebrow, title, opts = {}) {
     h('div', {}, eyebrow ? h('div', { class: 'eyebrow' }, eyebrow) : null, h('h1', {}, title, opts.count != null ? h('small', {}, opts.count) : null), opts.sub ? h('div', { class: 'sub' }, opts.sub) : null),
     opts.actions ? h('div', { class: 'actions' }, opts.actions) : null);
 }
+// 訊號網站（掃描訊號那個網站）：開新分頁，交易日誌留在原本分頁
+const SIGNAL_URL = '/';
+function signalLink(size) { return h('a', { href: SIGNAL_URL, target: '_blank', rel: 'noopener', class: 'ext' }, icon('signal', size), '訊號網站'); }
+function signalButton() { return h('a', { class: 'btn', href: SIGNAL_URL, target: '_blank', rel: 'noopener' }, icon('signal', 18), '訊號網站'); }
 function syncButton() {
   const running = state.sync.running;
   const b = h('button', { class: 'btn', type: 'button', disabled: running || null, onclick: () => doSync(false) }, (() => { const i = icon('sync', 18); if (running) i.classList.add('spin'); return i; })(), running ? '同步中…' : '同步最新交易');
