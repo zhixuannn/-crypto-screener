@@ -366,10 +366,10 @@ function pageHead(eyebrow, title, opts = {}) {
     h('div', {}, eyebrow ? h('div', { class: 'eyebrow' }, eyebrow) : null, h('h1', {}, title, opts.count != null ? h('small', {}, opts.count) : null), opts.sub ? h('div', { class: 'sub' }, opts.sub) : null),
     opts.actions ? h('div', { class: 'actions' }, opts.actions) : null);
 }
-// 訊號網站（掃描訊號那個網站）：開新分頁，交易日誌留在原本分頁
+// 訊號網站（掃描訊號那個網站）：同一個分頁直接換過去，訊號網站左邊有「交易日誌」可以跳回來
 const SIGNAL_URL = '/';
-function signalLink(size) { return h('a', { href: SIGNAL_URL, target: '_blank', rel: 'noopener', class: 'ext' }, icon('signal', size), '訊號網站'); }
-function signalButton() { return h('a', { class: 'btn', href: SIGNAL_URL, target: '_blank', rel: 'noopener' }, icon('signal', 18), '訊號網站'); }
+function signalLink(size) { return h('a', { href: SIGNAL_URL, class: 'ext' }, icon('signal', size), '訊號網站'); }
+function signalButton() { return h('a', { class: 'btn', href: SIGNAL_URL }, icon('signal', 18), '訊號網站'); }
 function syncButton() {
   const running = state.sync.running;
   const b = h('button', { class: 'btn', type: 'button', disabled: running || null, onclick: () => doSync(false) }, (() => { const i = icon('sync', 18); if (running) i.classList.add('spin'); return i; })(), running ? '同步中…' : '同步最新交易');
