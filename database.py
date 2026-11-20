@@ -52,6 +52,7 @@ def init_db():
             ('warning', 'TEXT'),
             ('tv_confirmed', 'INTEGER NOT NULL DEFAULT 0'),
             ('source', 'TEXT'),
+            ('snapshot', 'TEXT'),   # 盤面紀錄（K 棒＋當下數據，JSON）
         ]:
             try:
                 conn.execute(f'ALTER TABLE signals ADD COLUMN {col_name} {col_type}')
@@ -154,10 +155,12 @@ def record_signal(symbol: str, direction: str, entry_price: float, sl_price: flo
                                (symbol, direction, candle_time)).fetchone()
             if row:
                 cloud_backup.push('signal', [dict(row)])
+                return row['id']
         except sqlite3.IntegrityError:
             pass
         finally:
             conn.close()
+    return None
 
 
 def record_tv_alert(symbol: str, strategy: str, timeframe: str, direction: str, received_at: int) -> int:
@@ -241,19 +244,55 @@ def close_signal(signal_id: int, status: str, closed_at: int):
             cloud_backup.push('signal', [dict(row)])
 
 
+def _list_cols(conn) -> str:
+    # 列表不帶整包盤面（很大），只帶「有沒有盤面」
+    cols = [r[1] for r in conn.execute('PRAGMA table_info(signals)') if r[1] != 'snapshot']
+    return ', '.join(cols) + ', (snapshot IS NOT NULL) AS has_snapshot'
+
+
 def get_recent_signals(limit: int = 100, strategy: str = None) -> list:
     with _lock:
         conn = get_connection()
+        cols = _list_cols(conn)
         if strategy:
             rows = conn.execute(
-                'SELECT * FROM signals WHERE strategy = ? ORDER BY detected_at DESC LIMIT ?', (strategy, limit)
+                f'SELECT {cols} FROM signals WHERE strategy = ? ORDER BY detected_at DESC LIMIT ?', (strategy, limit)
             ).fetchall()
         else:
             rows = conn.execute(
-                'SELECT * FROM signals ORDER BY detected_at DESC LIMIT ?', (limit,)
+                f'SELECT {cols} FROM signals ORDER BY detected_at DESC LIMIT ?', (limit,)
             ).fetchall()
         conn.close()
         return [dict(row) for row in rows]
+
+
+def get_signal(signal_id: int):
+    with _lock:
+        conn = get_connection()
+        row = conn.execute('SELECT * FROM signals WHERE id = ?', (signal_id,)).fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+
+def set_snapshot(signal_id: int, part: dict):
+    """把盤面紀錄合併進這筆訊號（新的欄位蓋掉舊的），並備份到雲端。"""
+    with _lock:
+        conn = get_connection()
+        row = conn.execute('SELECT snapshot FROM signals WHERE id = ?', (signal_id,)).fetchone()
+        if row is None:
+            conn.close()
+            return
+        try:
+            cur = json.loads(row['snapshot']) if row['snapshot'] else {}
+        except Exception:
+            cur = {}
+        cur.update(part)
+        conn.execute('UPDATE signals SET snapshot = ? WHERE id = ?', (json.dumps(cur, ensure_ascii=False), signal_id))
+        conn.commit()
+        full = conn.execute('SELECT * FROM signals WHERE id = ?', (signal_id,)).fetchone()
+        conn.close()
+    if full:
+        cloud_backup.push('signal', [dict(full)])
 
 
 def symbol_to_tradingview(symbol: str) -> str:
@@ -334,7 +373,7 @@ def _row_r_multiple(r) -> float:
     return reward / risk
 
 
-def get_stats(start_ms: int = None, end_ms: int = None, strategy: str = None):
+def get_stats(start_ms: int = None, end_ms: int = None, strategy: str = None, timeframe: str = None):
     # 只取算統計需要的欄位 (不抓很長的 score_detail 文字，比較快)
     query = ("SELECT symbol, direction, entry_price, sl_price, tp_price, status, total_score, score_max "
              "FROM signals WHERE status IN ('tp_hit', 'sl_hit')")
@@ -342,6 +381,12 @@ def get_stats(start_ms: int = None, end_ms: int = None, strategy: str = None):
     if strategy:
         query += " AND strategy = ?"
         params.append(strategy)
+    if timeframe:
+        if timeframe == '5m':   # 很早期的訊號沒有記週期，那時只掃 5m
+            query += " AND (timeframe = ? OR timeframe IS NULL)"
+        else:
+            query += " AND timeframe = ?"
+        params.append(timeframe)
     if start_ms is not None:
         query += " AND detected_at >= ?"
         params.append(start_ms)
