@@ -89,6 +89,27 @@
         .range-btn.active { color: var(--cyan); border-color: var(--cyan); box-shadow: 0 0 10px rgba(25,227,255,0.2); }
         .range-bar input[type="date"] { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 5px 8px; font-size: 12px; display: none; color-scheme: dark; }
         .range-bar.custom-mode input[type="date"] { display: inline-block; }
+        .tf-bar { display: flex; align-items: center; gap: 6px; margin: -6px 0 18px; font-size: 12px; color: var(--text-dim); flex-wrap: wrap; }
+        .tf-btn { background: var(--panel); color: var(--text-dim); border: 1px solid var(--border); border-radius: 999px; padding: 6px 14px; font-size: 12px; cursor: pointer; font-family: inherit; }
+        .tf-btn.active { color: var(--magenta); border-color: var(--magenta); box-shadow: 0 0 10px rgba(255,61,240,0.2); }
+
+        /* ---------- 盤面紀錄 ---------- */
+        .snap-btn { font-size: 11px; font-weight: 700; color: var(--text-dim); background: none; border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; cursor: pointer; font-family: inherit; }
+        .snap-btn:hover { color: var(--magenta); border-color: var(--magenta); box-shadow: 0 0 10px rgba(255,61,240,0.25); }
+        .sc-links { display: flex; gap: 6px; align-items: center; }
+        .snap-mask { position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 16px; }
+        .snap-modal { width: min(760px, 100%); max-height: calc(100vh - 32px); overflow-y: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 18px 18px 20px; box-shadow: 0 0 30px rgba(25,227,255,0.12); }
+        .snap-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 12px; }
+        .snap-head b { font-size: 17px; }
+        .snap-close { background: none; border: 1px solid var(--border); color: var(--text-dim); border-radius: 8px; width: 32px; height: 32px; cursor: pointer; font-size: 16px; }
+        .snap-chart { width: 100%; background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; }
+        .snap-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--text-dim); margin: 8px 2px 14px; }
+        .snap-legend i { display: inline-block; width: 14px; height: 2px; vertical-align: middle; margin-right: 5px; }
+        .snap-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+        .snap-table td { padding: 8px 4px; border-bottom: 1px solid var(--border); }
+        .snap-table td:first-child { color: var(--text-dim); }
+        .snap-table td:last-child { text-align: right; }
+        .snap-note { font-size: 12px; color: var(--text-dim); margin-top: 10px; }
 
         /* ---------- 訊號卡片 ---------- */
         .signal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
@@ -332,6 +353,13 @@
                     <input type="date" id="rangeStart">
                     <input type="date" id="rangeEnd">
                 </div>
+            </div>
+
+            <div class="tf-bar" id="tfBar">
+                <span>週期</span>
+                <button class="tf-btn active" data-tf="all">全部</button>
+                <button class="tf-btn" data-tf="5m">5m</button>
+                <button class="tf-btn" data-tf="15m">15m</button>
             </div>
 
             <div class="kpi-grid">
@@ -590,7 +618,7 @@
                         liveHtml +
                         '<div class="sc-status-row">' +
                             '<span class="sc-status-left"><span class="status-dot"></span>追蹤中　' + s.ago_str + '</span>' +
-                            tvLinkHtml(s.symbol) +
+                            '<span class="sc-links">' + snapBtnHtml(s) + tvLinkHtml(s.symbol) + '</span>' +
                         '</div>' +
                     '</div>';
         }
@@ -615,7 +643,7 @@
                         '<div class="cc-bottom">' +
                             '<div class="cc-r mono ' + rClass + '">' + rSign + r.toFixed(1) + 'R</div>' +
                             '<div class="cc-time">' + s.ago_str + '</div>' +
-                            tvLinkHtml(s.symbol) +
+                            '<span class="sc-links">' + snapBtnHtml(s) + tvLinkHtml(s.symbol) + '</span>' +
                         '</div>' +
                     '</div>';
         }
@@ -627,6 +655,105 @@
                     jumpToChart(this.getAttribute('data-symbol'));
                 });
             }
+            var sb = container.querySelectorAll('[data-snap]');
+            for (var j = 0; j < sb.length; j++) {
+                sb[j].addEventListener('click', function() { openSnapshot(this.getAttribute('data-snap')); });
+            }
+        }
+
+        /* ---------- 盤面紀錄 ---------- */
+        function snapBtnHtml(s) {
+            return '<button class="snap-btn" type="button" data-snap="' + s.id + '">盤面</button>';
+        }
+        function fmtBig(n) {
+            if (n == null) return '—';
+            var a = Math.abs(n);
+            if (a >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+            if (a >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+            if (a >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+            return String(n);
+        }
+        function fmtTime(ms) {
+            if (!ms) return '—';
+            var d = new Date(ms);
+            function p(x) { return (x < 10 ? '0' : '') + x; }
+            return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+        }
+        function closeSnapshot() { var m = document.getElementById('snapMask'); if (m) m.remove(); }
+        document.addEventListener('keydown', function(e) { if (e.key === 'Escape') closeSnapshot(); });
+        function openSnapshot(id) {
+            closeSnapshot();
+            var mask = document.createElement('div');
+            mask.className = 'snap-mask'; mask.id = 'snapMask';
+            mask.innerHTML = '<div class="snap-modal" role="dialog" aria-modal="true"><div class="snap-head"><b>盤面紀錄</b><button class="snap-close" type="button" aria-label="關閉">✕</button></div><div class="empty">載入中...</div></div>';
+            mask.addEventListener('click', function(e) { if (e.target === mask) closeSnapshot(); });
+            mask.querySelector('.snap-close').addEventListener('click', closeSnapshot);
+            document.body.appendChild(mask);
+            fetch('/api/signal/' + encodeURIComponent(id) + '/snapshot')
+                .then(function(r) { return r.json(); })
+                .then(function(j) { renderSnapshot(mask.querySelector('.snap-modal'), j); })
+                .catch(function() { mask.querySelector('.empty').textContent = '載入失敗，稍後再試'; });
+        }
+        function snapChartSvg(sig, snap) {
+            var before = (snap && snap.before) || [], after = (snap && snap.after) || [];
+            var bars = before.concat(after);
+            if (!bars.length) return '<div class="empty">這筆沒有 K 棒紀錄（可能是盤面功能上線前的訊號，或當時抓不到資料）</div>';
+            var W = 720, H = 300, padL = 8, padR = 104, padT = 14, padB = 24;
+            var lo = Infinity, hi = -Infinity;
+            bars.forEach(function(b) { lo = Math.min(lo, b[3]); hi = Math.max(hi, b[2]); });
+            [sig.entry_price, sig.sl_price, sig.tp_price].forEach(function(v) { if (v != null) { lo = Math.min(lo, v); hi = Math.max(hi, v); } });
+            var span = (hi - lo) || hi * 0.01 || 1; lo -= span * 0.06; hi += span * 0.06;
+            var n = bars.length, cw = (W - padL - padR) / n;
+            function y(v) { return padT + (H - padT - padB) * (1 - (v - lo) / (hi - lo)); }
+            function x(i) { return padL + cw * i + cw / 2; }
+            var out = '';
+            var sigIdx = -1;
+            for (var i = 0; i < n; i++) if (bars[i][0] === sig.candle_time) sigIdx = i;
+            if (sigIdx >= 0) out += '<rect x="' + (x(sigIdx) - cw / 2) + '" y="' + padT + '" width="' + cw + '" height="' + (H - padT - padB) + '" fill="rgba(255,201,77,0.12)"/>';
+            for (var k = 0; k < n; k++) {
+                var b = bars[k], up = b[4] >= b[1], col = up ? 'var(--long)' : 'var(--short)';
+                var top = y(Math.max(b[1], b[4])), bot = y(Math.min(b[1], b[4]));
+                out += '<line x1="' + x(k) + '" x2="' + x(k) + '" y1="' + y(b[2]) + '" y2="' + y(b[3]) + '" stroke="' + col + '" stroke-width="1"/>' +
+                       '<rect x="' + (x(k) - Math.max(1, cw * 0.32)) + '" y="' + top + '" width="' + Math.max(2, cw * 0.64) + '" height="' + Math.max(1, bot - top) + '" fill="' + col + '"/>';
+            }
+            function hline(v, col, label, dash) {
+                if (v == null) return '';
+                var yy = y(v);
+                return '<line x1="' + padL + '" x2="' + (W - padR) + '" y1="' + yy + '" y2="' + yy + '" stroke="' + col + '" stroke-width="1.2"' + (dash ? ' stroke-dasharray="5 4"' : '') + '/>' +
+                       '<text x="' + (W - padR + 6) + '" y="' + (yy + 4) + '" fill="' + col + '" font-size="11" font-family="JetBrains Mono, monospace">' + label + ' ' + formatPrice(v) + '</text>';
+            }
+            out += hline(sig.tp_price, 'var(--long)', 'TP', true) + hline(sig.entry_price, 'var(--cyan)', '進', false) + hline(sig.sl_price, 'var(--short)', 'SL', true);
+            if (before.length && after.length) {
+                var xx = padL + cw * before.length;
+                out += '<line x1="' + xx + '" x2="' + xx + '" y1="' + padT + '" y2="' + (H - padB) + '" stroke="var(--text-dim)" stroke-dasharray="2 4"/>';
+            }
+            out += '<text x="' + padL + '" y="' + (H - 6) + '" fill="var(--text-dim)" font-size="11">' + fmtTime(bars[0][0]) + '</text>' +
+                   '<text x="' + (W - padR) + '" y="' + (H - 6) + '" fill="var(--text-dim)" font-size="11" text-anchor="end">' + fmtTime(bars[n - 1][0]) + '</text>';
+            return '<svg class="snap-chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="訊號前後的 K 線">' + out + '</svg>';
+        }
+        function renderSnapshot(box, j) {
+            if (!j || !j.ok) { box.querySelector('.empty').textContent = '找不到這筆訊號'; return; }
+            var sig = j.signal, snap = j.snapshot || {}, d = snap.data || {};
+            var dirText = sig.direction === 'long' ? '做多' : '做空';
+            var status = sig.status === 'open' ? '追蹤中' : (sig.status === 'tp_hit' ? '止盈 +1R' : '止損 -1R');
+            var fr = d.funding_rate != null ? (d.funding_rate * 100).toFixed(4) + '%' : '—';
+            var ch = d.change_24h != null ? (d.change_24h > 0 ? '+' : '') + d.change_24h.toFixed(2) + '%' : '—';
+            var rows = [
+                ['訊號時間', fmtTime(sig.candle_time)],
+                ['結果', status + (sig.closed_at ? '（' + fmtTime(sig.closed_at) + '）' : '')],
+                ['當下價格', d.price != null ? formatPrice(d.price) : '—'],
+                ['24h 漲跌', ch],
+                ['24h 成交額', d.quote_volume_24h != null ? fmtBig(d.quote_volume_24h) + ' USDT' : '—'],
+                ['資金費率', fr],
+                ['持倉量 OI', d.open_interest != null ? fmtBig(d.open_interest) + ' USDT' : '—'],
+                ['評分', sig.total_score != null ? sig.total_score + ' / ' + (sig.score_max || 100) : '—']
+            ];
+            var t = '<table class="snap-table"><tbody>' + rows.map(function(r) { return '<tr><td>' + r[0] + '</td><td class="mono">' + escapeHtml(String(r[1])) + '</td></tr>'; }).join('') + '</tbody></table>';
+            box.innerHTML = '<div class="snap-head"><b>' + escapeHtml(sig.symbol.split('/')[0]) + '　<span class="sc-tf mono">' + escapeHtml(sig.timeframe || '5m') + '</span>　' + dirText + '</b><button class="snap-close" type="button" aria-label="關閉">✕</button></div>' +
+                snapChartSvg(sig, snap) +
+                '<div class="snap-legend"><span><i style="background:var(--cyan)"></i>進場</span><span><i style="background:var(--short)"></i>止損</span><span><i style="background:var(--long)"></i>止盈</span><span><i style="background:rgba(255,201,77,0.6);height:8px"></i>訊號那根</span>' + (snap.after && snap.after.length ? '<span>虛線右邊＝進場後到出場</span>' : '') + '</div>' +
+                t + '<div class="snap-note">數據是訊號出現當下抓的。BingX 沒有提供多空比，所以沒有這一項。</div>';
+            box.querySelector('.snap-close').addEventListener('click', closeSnapshot);
         }
 
         function renderSignalGroup(boxId, countId, list, emptyText, isClosed) {
@@ -918,7 +1045,11 @@
         document.getElementById('lookupBtn').addEventListener('click', doLookup);
         document.getElementById('lookupInput').addEventListener('keydown', function(e) { if (e.key === 'Enter') doLookup(); });
 
+        var currentTf = 'all';
         function buildQueryString() {
+            return buildRangeQuery() + (currentTf !== 'all' ? '&tf=' + currentTf : '');
+        }
+        function buildRangeQuery() {
             if (currentRange === 'custom') {
                 var s = document.getElementById('rangeStart').value;
                 var e = document.getElementById('rangeEnd').value;
@@ -957,6 +1088,15 @@
                 var bar = document.getElementById('rangeBar');
                 if (currentRange === 'custom') bar.classList.add('custom-mode');
                 else bar.classList.remove('custom-mode');
+                fetchAndRender();
+            });
+        }
+        var tfButtons = document.querySelectorAll('.tf-btn');
+        for (var t = 0; t < tfButtons.length; t++) {
+            tfButtons[t].addEventListener('click', function() {
+                for (var u = 0; u < tfButtons.length; u++) tfButtons[u].classList.remove('active');
+                this.classList.add('active');
+                currentTf = this.getAttribute('data-tf');
                 fetchAndRender();
             });
         }
