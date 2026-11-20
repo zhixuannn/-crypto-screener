@@ -7,6 +7,8 @@ import os
 import json
 import threading
 
+import cloud_backup
+
 DB_PATH = os.environ.get('DATABASE_PATH', 'signals.db')
 _lock = threading.Lock()
 
@@ -94,6 +96,10 @@ def init_db():
             'CREATE INDEX IF NOT EXISTS idx_tv_received ON tv_alerts(received_at)',
         ):
             conn.execute(idx_sql)
+        try:   # 從雲端抓回 TV 警報時用來避免重複
+            conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS uq_tv_alert ON tv_alerts(received_at, symbol, strategy, timeframe, direction)')
+        except sqlite3.Error:
+            pass
 
         conn.commit()
         conn.close()
@@ -144,6 +150,10 @@ def record_signal(symbol: str, direction: str, entry_price: float, sl_price: flo
                  oi_score, cvd_score, total_score, score_note, score_max, score_detail, warning, source)
             )
             conn.commit()
+            row = conn.execute('SELECT * FROM signals WHERE symbol = ? AND direction = ? AND candle_time = ?',
+                               (symbol, direction, candle_time)).fetchone()
+            if row:
+                cloud_backup.push('signal', [dict(row)])
         except sqlite3.IntegrityError:
             pass
         finally:
@@ -159,7 +169,10 @@ def record_tv_alert(symbol: str, strategy: str, timeframe: str, direction: str, 
         )
         conn.commit()
         alert_id = cur.lastrowid
+        row = conn.execute('SELECT * FROM tv_alerts WHERE id = ?', (alert_id,)).fetchone()
         conn.close()
+        if row:
+            cloud_backup.push('tv_alert', [dict(row)])
         return alert_id
 
 
@@ -168,7 +181,10 @@ def update_tv_alert(alert_id: int, matched: bool, note: str = None):
         conn = get_connection()
         conn.execute('UPDATE tv_alerts SET matched = ?, note = ? WHERE id = ?', (1 if matched else 0, note, alert_id))
         conn.commit()
+        row = conn.execute('SELECT * FROM tv_alerts WHERE id = ?', (alert_id,)).fetchone()
         conn.close()
+        if row:
+            cloud_backup.push('tv_alert', [dict(row)])
 
 
 def get_recent_tv_alerts(limit: int = 50) -> list:
@@ -190,7 +206,14 @@ def mark_tv_confirmed(symbol: str, strategy: str, timeframe: str, direction: str
         )
         conn.commit()
         n = cur.rowcount
+        rows = []
+        if n:
+            rows = conn.execute(
+                'SELECT * FROM signals WHERE symbol = ? AND strategy = ? AND direction = ? '
+                'AND (timeframe = ? OR (timeframe IS NULL AND ? IS NULL)) AND detected_at >= ?',
+                (symbol, strategy, direction, timeframe, timeframe, since_ms)).fetchall()
         conn.close()
+        cloud_backup.push('signal', [dict(r) for r in rows])
         return n
 
 
@@ -212,7 +235,10 @@ def close_signal(signal_id: int, status: str, closed_at: int):
             (status, closed_at, signal_id)
         )
         conn.commit()
+        row = conn.execute('SELECT * FROM signals WHERE id = ?', (signal_id,)).fetchone()
         conn.close()
+        if row:
+            cloud_backup.push('signal', [dict(row)])
 
 
 def get_recent_signals(limit: int = 100, strategy: str = None) -> list:
@@ -424,3 +450,37 @@ def get_open_signal_for_symbol(symbol: str, strategy: str = 'xuan'):
         ).fetchone()
         conn.close()
         return dict(row) if row else None
+
+
+# ---------------------------------------------------------------- 開機時從雲端（Supabase）抓回訊號紀錄
+def restore_from_cloud() -> dict:
+    """把雲端備份的訊號、TV 警報放回本機 SQLite。本機已經有的不重複加；雲端已結束的單會把本機狀態更新成結束。"""
+    if not cloud_backup.enabled():
+        return {'enabled': False}
+    sigs = cloud_backup.fetch_all('signal')
+    tvs = cloud_backup.fetch_all('tv_alert')
+    added_s = added_t = 0
+    with _lock:
+        conn = get_connection()
+        s_cols = [r[1] for r in conn.execute('PRAGMA table_info(signals)') if r[1] != 'id']
+        t_cols = [r[1] for r in conn.execute('PRAGMA table_info(tv_alerts)') if r[1] != 'id']
+        for d in sorted(sigs, key=lambda x: x.get('detected_at') or 0):
+            cols = [c for c in s_cols if c in d]
+            cur = conn.execute(f'INSERT OR IGNORE INTO signals ({",".join(cols)}) VALUES ({",".join("?" * len(cols))})',
+                               [d[c] for c in cols])
+            if cur.rowcount:
+                added_s += 1
+            elif d.get('status') and d.get('status') != 'open':
+                conn.execute("UPDATE signals SET status = ?, closed_at = ? WHERE symbol = ? AND direction = ? AND candle_time = ? AND status = 'open'",
+                             (d['status'], d.get('closed_at'), d['symbol'], d['direction'], d['candle_time']))
+            if d.get('tv_confirmed'):
+                conn.execute('UPDATE signals SET tv_confirmed = 1 WHERE symbol = ? AND direction = ? AND candle_time = ?',
+                             (d['symbol'], d['direction'], d['candle_time']))
+        for d in sorted(tvs, key=lambda x: x.get('received_at') or 0):
+            cols = [c for c in t_cols if c in d]
+            cur = conn.execute(f'INSERT OR IGNORE INTO tv_alerts ({",".join(cols)}) VALUES ({",".join("?" * len(cols))})',
+                               [d[c] for c in cols])
+            added_t += cur.rowcount
+        conn.commit()
+        conn.close()
+    return {'enabled': True, 'signals': len(sigs), 'tv_alerts': len(tvs), 'added_signals': added_s, 'added_tv_alerts': added_t}
