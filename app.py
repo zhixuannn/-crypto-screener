@@ -649,6 +649,30 @@ def _startup_binance_check():
 
 
 database.init_db()
+
+
+def _restore_signals():
+    # Render 免費方案重新部署會清空 signals.db：開機先把 Supabase 的備份抓回來，失敗就每分鐘再試，最多 30 次
+    for attempt in range(30):
+        try:
+            res = database.restore_from_cloud()
+            if res.get('enabled'):
+                logger.info(f'[雲端備份] 已從 Supabase 抓回訊號紀錄: {res}')
+            else:
+                logger.warning('[雲端備份] 沒有設定 SUPABASE_URL / SUPABASE_SERVICE_KEY，訊號紀錄只存在本機，重新部署會不見')
+            return
+        except Exception as e:
+            logger.warning(f'[雲端備份] 抓回訊號紀錄失敗（第 {attempt + 1} 次）: {e}')
+            time.sleep(60)
+
+
+try:
+    _restore_signals_first = database.restore_from_cloud()
+    if _restore_signals_first.get('enabled'):
+        logger.info(f'[雲端備份] 已從 Supabase 抓回訊號紀錄: {_restore_signals_first}')
+except Exception as _e:
+    logger.warning(f'[雲端備份] 開機抓回訊號紀錄失敗，背景重試: {_e}')
+    threading.Thread(target=_restore_signals, daemon=True).start()
 _scheduler = start_scheduler()
 
 # 交易日誌（/journal）：BingX API 同步 + Supabase
