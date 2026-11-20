@@ -21,6 +21,7 @@ import lookup
 import scoring
 import xuan_scoring
 import binance_data
+import snapshot
 import json
 import hmac
 import re
@@ -28,7 +29,14 @@ import re
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
-TIMEFRAME = os.environ.get('SCAN_TIMEFRAME', '5m')
+TIMEFRAME = os.environ.get('SCAN_TIMEFRAME', '5m')          # 主要週期（舊資料、TV 警報預設都是這個）
+# 要掃的週期：預設 5m＋15m 一起掃，紀錄和績效分開算
+SCAN_TIMEFRAMES = [t.strip() for t in os.environ.get('SCAN_TIMEFRAMES', f'{TIMEFRAME},15m').split(',') if t.strip()]
+if TIMEFRAME not in SCAN_TIMEFRAMES:
+    SCAN_TIMEFRAMES.insert(0, TIMEFRAME)
+# 哪些週期要發 Telegram：15m 先測試、不發；績效好再加進來（Render 環境變數 NOTIFY_TIMEFRAMES=5m,15m）
+NOTIFY_TIMEFRAMES = {t.strip() for t in os.environ.get('NOTIFY_TIMEFRAMES', TIMEFRAME).split(',') if t.strip()}
+TF_MS = {'1m': 60_000, '3m': 180_000, '5m': 300_000, '15m': 900_000, '30m': 1_800_000, '1h': 3_600_000}
 SCAN_INTERVAL_MINUTES = int(os.environ.get('SCAN_INTERVAL_MINUTES', '5'))
 SWING_LENGTH = int(os.environ.get('SWING_LENGTH', '5'))
 BOOTSTRAP_CANDLE_LIMIT = int(os.environ.get('BOOTSTRAP_CANDLE_LIMIT', '1000'))
@@ -85,28 +93,41 @@ def get_scan_symbols() -> list:
 
 # ==================== XUAN 3+1 ====================
 
-def _scan_one_symbol_stateful_impl(symbol: str):
+def _state_key(symbol: str, tf: str) -> str:
+    # 主要週期沿用舊的 key（幣種本身），其他週期加上 |週期，例如 'BTC/USDT:USDT|15m'
+    return symbol if tf == TIMEFRAME else f'{symbol}|{tf}'
+
+
+def _scan_one_symbol_stateful_impl(symbol: str, tf: str = None, force: bool = False):
+    tf = tf or TIMEFRAME
+    TIMEFRAME_ = tf
     try:
-        exchange = exchange_client.get_exchange()
-        state_row = database.get_symbol_state(symbol)
+        key = _state_key(symbol, tf)
+        state_row = database.get_symbol_state(key)
         is_new = state_row is None
+        if not is_new and not force:
+            # 還不可能有新的收盤 K 棒就不去問 BingX（15m 每 15 分鐘才需要抓一次，省一半以上的請求）
+            step = TF_MS.get(tf)
+            if step and time.time() * 1000 < state_row[1] + 2 * step + 3000:
+                return symbol, []
+        exchange = exchange_client.get_exchange()
 
         if is_new:
             candles = exchange_client.fetch_closed_candles(
-                exchange, symbol, timeframe=TIMEFRAME, limit=BOOTSTRAP_CANDLE_LIMIT
+                exchange, symbol, timeframe=TIMEFRAME_, limit=BOOTSTRAP_CANDLE_LIMIT
             )
             if len(candles) < SWING_LENGTH * 3:
                 return symbol, []
             state = strategy.new_state(swing_len=SWING_LENGTH)
             state, _bootstrap_signals = strategy.advance_state(state, candles, rr=TP_RR)
             last_candle_time = candles[-1][0]
-            logger.info(f'[XUAN] {symbol} 新幣種初始化完成，用了 {len(candles)} 根歷史K棒補記憶')
+            logger.info(f'[XUAN] {symbol} {tf} 新幣種初始化完成，用了 {len(candles)} 根歷史K棒補記憶')
             result_signals = []
         else:
             state_json, last_candle_time = state_row
             state = strategy.state_from_json(state_json)
             new_candles = exchange_client.fetch_new_closed_candles(
-                exchange, symbol, timeframe=TIMEFRAME, since_ms=last_candle_time
+                exchange, symbol, timeframe=TIMEFRAME_, since_ms=last_candle_time
             )
             if not new_candles:
                 return symbol, []
@@ -114,11 +135,11 @@ def _scan_one_symbol_stateful_impl(symbol: str):
             last_candle_time = new_candles[-1][0]
 
         database.save_symbol_state(
-            symbol, strategy.state_to_json(state), last_candle_time, int(time.time() * 1000)
+            key, strategy.state_to_json(state), last_candle_time, int(time.time() * 1000)
         )
         return symbol, result_signals
     except Exception as e:
-        logger.warning(f'[XUAN] 掃描 {symbol} 失敗: {e}')
+        logger.warning(f'[XUAN] 掃描 {symbol} {tf} 失敗: {e}')
         return symbol, []
 
 
@@ -136,16 +157,22 @@ def _lock_for(key: str):
         return _symbol_locks[key]
 
 
-def scan_one_symbol_stateful(symbol: str):
-    with _lock_for(symbol):
-        return _scan_one_symbol_stateful_impl(symbol)
+def scan_one_symbol_stateful(symbol: str, tf: str = None, force: bool = False):
+    tf = tf or TIMEFRAME
+    with _lock_for(_state_key(symbol, tf)):
+        return _scan_one_symbol_stateful_impl(symbol, tf, force)
+
+
+def tf_label(tf) -> str:
+    return f'XUAN 3+1 · {tf or TIMEFRAME}'
 
 
 # ==================== 未平倉檢查 ====================
 
 def check_open_signal(row: dict):
     symbol = row['symbol']
-    strategy_label = 'XUAN 3+1'
+    tf = row.get('timeframe') or TIMEFRAME
+    strategy_label = tf_label(tf)
     try:
         exchange = exchange_client.get_exchange()
         candles = exchange_client.fetch_closed_candles(exchange, symbol, timeframe=TIMEFRAME, limit=2)
@@ -172,9 +199,12 @@ def check_open_signal(row: dict):
         if hit_sl or hit_tp:
             status = 'tp_hit' if hit_tp else 'sl_hit'
             exit_price = tp if hit_tp else sl
-            database.close_signal(row['id'], status, int(time.time() * 1000))
-            message = notifier.format_close_message(symbol, direction, status, row['entry_price'], exit_price, strategy_label=strategy_label)
-            notifier.send_telegram_message(message)
+            closed_at = int(time.time() * 1000)
+            database.close_signal(row['id'], status, closed_at)
+            snapshot.capture_exit(row['id'], symbol, tf, row['candle_time'], closed_at)
+            if tf in NOTIFY_TIMEFRAMES:
+                message = notifier.format_close_message(symbol, direction, status, row['entry_price'], exit_price, strategy_label=strategy_label)
+                notifier.send_telegram_message(message)
             logger.info(f'[{strategy_label}] {symbol} {direction} 已{"止盈" if hit_tp else "止損"}')
     except Exception as e:
         logger.warning(f'檢查未平倉訊號 {symbol} 失敗: {e}')
@@ -232,11 +262,17 @@ def process_signals(symbol: str, signals: list, timeframe: str, source: str = 's
             if not passed:
                 counts['blocked'] += 1
                 continue
-            database.record_signal(
+            signal_id = database.record_signal(
                 symbol, signal.direction, signal.entry_price, signal.sl_price, signal.tp_price,
                 signal.candle_time, int(time.time() * 1000), strategy=strategy, timeframe=timeframe,
                 score=score, source=source
             )
+        snapshot.capture_entry(signal_id, symbol, timeframe, signal.candle_time)
+        counts['found'] += 1
+        score_text = (str(score['total']) + '/' + str(score['max'])) if score else '無'
+        logger.info(f'[{tf_label(timeframe)}] 新訊號({source}): {symbol} {signal.direction} @ {signal.entry_price} 分數={score_text}')
+        if timeframe not in NOTIFY_TIMEFRAMES:
+            continue   # 測試中的週期（例如 15m）：只記錄、算績效，不發通知也不進交易日誌
         try:   # 交易日誌的紙上驗證：當作有下單，之後自動用 K 線結算
             import journal.paper as _paper
             _paper.record_signal(symbol, signal.direction, signal.entry_price, signal.sl_price, signal.tp_price,
@@ -245,12 +281,9 @@ def process_signals(symbol: str, signals: list, timeframe: str, source: str = 's
             logger.warning(f'[紙上] 記錄失敗: {e}')
         message = notifier.format_signal_message(
             symbol, signal.direction, signal.entry_price, signal.sl_price, signal.tp_price, timeframe,
-            strategy_label='XUAN 3+1', score=score, source=source
+            strategy_label=tf_label(timeframe), score=score, source=source
         )
         notifier.send_telegram_message(message)
-        counts['found'] += 1
-        score_text = (str(score['total']) + '/' + str(score['max'])) if score else '無'
-        logger.info(f'[XUAN 3+1] 新訊號({source}): {symbol} {signal.direction} @ {signal.entry_price} 分數={score_text}')
     return counts
 
 
@@ -273,7 +306,7 @@ def scan_market():
         logger.warning('這次掃描沒有可用的幣種清單，跳過本輪')
         return
 
-    logger.info(f'共 {len(symbols)} 個幣種 (CMC前{cmc_client.TOP_N}大 ∩ BingX永續，已排除穩定幣)，開始逐一掃描 (併發數: {MAX_WORKERS})')
+    logger.info(f'共 {len(symbols)} 個幣種 (CMC前{cmc_client.TOP_N}大 ∩ BingX永續，已排除穩定幣)，週期 {"＋".join(SCAN_TIMEFRAMES)}，開始逐一掃描 (併發數: {MAX_WORKERS})')
 
     found_count = 0
     skipped_already_open = 0
@@ -281,10 +314,10 @@ def scan_market():
 
     t_scan0 = time.time()
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-        futures = {pool.submit(scan_one_symbol_stateful, s): s for s in symbols}
+        futures = {pool.submit(scan_one_symbol_stateful, s, tf): tf for s in symbols for tf in SCAN_TIMEFRAMES}
         for future in as_completed(futures):
             symbol, signals = future.result()
-            c = process_signals(symbol, signals, TIMEFRAME)
+            c = process_signals(symbol, signals, futures[future])
             found_count += c['found']
             skipped_already_open += c['skipped_open']
             blocked_by_score += c['blocked']
@@ -391,15 +424,15 @@ _stats_cache = {}                 # (start, end) -> (時間, overall, per_symbol
 _stats_lock = threading.Lock()
 
 
-def _get_stats_cached(start_ms, end_ms):
+def _get_stats_cached(start_ms, end_ms, tf=None):
     """統計：同樣的時間範圍 30 秒內不重算。起訖時間取到『分鐘』，這樣『今天』這種範圍才會命中快取。"""
-    key = (None if start_ms is None else start_ms // 60000, None if end_ms is None else end_ms // 60000)
+    key = (None if start_ms is None else start_ms // 60000, None if end_ms is None else end_ms // 60000, tf)
     now = time.time()
     with _stats_lock:
         hit = _stats_cache.get(key)
         if hit and now - hit[0] < STATS_TTL:
             return hit[1], hit[2]
-    overall, per_symbol = database.get_stats(start_ms, end_ms, strategy='xuan')
+    overall, per_symbol = database.get_stats(start_ms, end_ms, strategy='xuan', timeframe=tf)
     with _stats_lock:
         _stats_cache[key] = (now, overall, per_symbol)
         if len(_stats_cache) > 50:
@@ -408,7 +441,7 @@ def _get_stats_cached(start_ms, end_ms):
     return overall, per_symbol
 
 
-def build_dashboard_data(start_ms=None, end_ms=None) -> dict:
+def build_dashboard_data(start_ms=None, end_ms=None, tf=None) -> dict:
     t0 = time.time()
     now_ms = int(t0 * 1000)
     timing = {}
@@ -431,7 +464,7 @@ def build_dashboard_data(start_ms=None, end_ms=None) -> dict:
         symbols_updated_str = dt.astimezone().strftime('%Y-%m-%d %H:%M')
 
     t2 = time.time()
-    xuan_overall, xuan_per_symbol = _get_stats_cached(start_ms, end_ms)
+    xuan_overall, xuan_per_symbol = _get_stats_cached(start_ms, end_ms, tf)
     timing['stats'] = int((time.time() - t2) * 1000)
     timing['total'] = int((time.time() - t0) * 1000)
     logger.info(f'[載入速度] /api/data 共 {timing["total"]} ms (訊號 {timing["signals"]}／即時價 {timing["prices"]}／統計 {timing["stats"]})')
@@ -446,6 +479,9 @@ def build_dashboard_data(start_ms=None, end_ms=None) -> dict:
         'xuan_overall_stats': xuan_overall,
         'xuan_per_symbol_stats': xuan_per_symbol,
         'timeframe': TIMEFRAME,
+        'timeframes': SCAN_TIMEFRAMES,
+        'notify_timeframes': sorted(NOTIFY_TIMEFRAMES),
+        'stats_tf': tf or 'all',
         'timing_ms': timing,
     }
 
@@ -491,7 +527,7 @@ def handle_tv_alert(alert_id: int, symbol: str, timeframe: str, direction: str):
     matched = False
     try:
         for attempt in range(3):
-            _, signals = scan_one_symbol_stateful(symbol)
+            _, signals = scan_one_symbol_stateful(symbol, timeframe, force=True)
             process_signals(symbol, signals, timeframe, source='tv')
             n = database.mark_tv_confirmed(symbol, 'xuan', timeframe, direction,
                                             since_ms=int(time.time() * 1000) - 20 * 60 * 1000)
@@ -528,8 +564,8 @@ def webhook_tv():
 
     if not symbol or not timeframe or direction not in ('long', 'short'):
         return jsonify({'ok': False, 'error': 'bad payload'}), 400
-    if timeframe != TIMEFRAME:
-        return jsonify({'ok': False, 'error': f'only {TIMEFRAME} is scanned'}), 400
+    if timeframe not in SCAN_TIMEFRAMES:
+        return jsonify({'ok': False, 'error': f'only {",".join(SCAN_TIMEFRAMES)} are scanned'}), 400
 
     scan_list, _ = database.get_scan_symbols_cached()
     alert_id = database.record_tv_alert(symbol, 'xuan', timeframe, direction, int(time.time() * 1000))
@@ -590,13 +626,30 @@ def api_tv_alerts():
 
 @app.route('/')
 def index():
-    return render_template('index.html', timeframe=TIMEFRAME)
+    return render_template('index.html', timeframe='＋'.join(SCAN_TIMEFRAMES))
 
 
 @app.route('/api/data')
 def api_data():
     start_ms, end_ms = resolve_time_range(request.args)
-    return jsonify(build_dashboard_data(start_ms, end_ms))
+    tf = request.args.get('tf')
+    tf = tf if tf in SCAN_TIMEFRAMES else None
+    return jsonify(build_dashboard_data(start_ms, end_ms, tf))
+
+
+@app.route('/api/signal/<int:signal_id>/snapshot')
+def api_signal_snapshot(signal_id):
+    """盤面紀錄：訊號前 60 根 K 棒、出場前的 K 棒、當下數據。"""
+    row = database.get_signal(signal_id)
+    if not row:
+        return jsonify({'ok': False, 'error': 'not found'}), 404
+    try:
+        snap = json.loads(row.get('snapshot') or 'null')
+    except Exception:
+        snap = None
+    keep = ('id', 'symbol', 'direction', 'entry_price', 'sl_price', 'tp_price', 'candle_time', 'detected_at',
+            'status', 'closed_at', 'timeframe', 'total_score', 'score_max', 'score_note')
+    return jsonify({'ok': True, 'signal': {k: row.get(k) for k in keep}, 'snapshot': snap})
 
 
 @app.route('/chart/<path:symbol>')
