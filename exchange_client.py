@@ -12,6 +12,13 @@ _markets_loaded_at = 0.0
 _markets_lock = threading.Lock()
 MARKETS_TTL_SEC = 3600
 
+# 全站共用「一個」BingX 連線物件。
+# 以前每次 get_exchange() 都新建一個 ccxt 物件再塞進整份市場清單，一次掃描就建一百多個，
+# 每個都要好幾 MB、又吃 CPU，Render 免費方案（512MB）因此常常記憶體爆掉重開、查幣也很慢。
+# 現在只建一個大家共用（只讀公開行情，多執行緒一起用沒問題），市場清單每小時更新時才換新的。
+_shared = None
+_shared_lock = threading.Lock()
+
 
 def _new_exchange():
     return ccxt.bingx({
@@ -24,7 +31,7 @@ def _new_exchange():
 
 def _get_cached_markets():
     """BingX 的市場清單很大，載入要好幾秒。全站共用一份，每小時才重抓一次。"""
-    global _markets_cache, _markets_loaded_at
+    global _markets_cache, _markets_loaded_at, _shared
     with _markets_lock:
         now = time.time()
         if _markets_cache is not None and now - _markets_loaded_at < MARKETS_TTL_SEC:
@@ -34,6 +41,8 @@ def _get_cached_markets():
             tmp.load_markets()
             _markets_cache = tmp.markets
             _markets_loaded_at = now
+            with _shared_lock:
+                _shared = tmp          # 剛載好市場清單的這個，直接當共用連線
         except Exception:
             # 載入失敗就沿用舊的 (如果有)，沒有的話回傳 None 讓呼叫端自己處理
             pass
@@ -42,17 +51,15 @@ def _get_cached_markets():
 
 def get_exchange():
     """
-    建立 BingX 交易所連線物件 (只讀公開資料，不需要API金鑰)。
-    每次都是新的物件 (避免多執行緒互相干擾)，但市場清單用共用快取，不用每次重載。
+    回傳全站共用的 BingX 連線物件 (只讀公開資料，不需要API金鑰)。
+    市場清單過期時會順便重抓並換一個新的共用物件。
     """
-    exchange = _new_exchange()
-    markets = _get_cached_markets()
-    if markets:
-        try:
-            exchange.set_markets(markets)
-        except Exception:
-            pass
-    return exchange
+    global _shared
+    _get_cached_markets()
+    with _shared_lock:
+        if _shared is None:
+            _shared = _new_exchange()   # 市場清單抓不到時先給一個空的，ccxt 用到時會自己載
+        return _shared
 
 
 def get_perpetual_symbols(exchange) -> list:
