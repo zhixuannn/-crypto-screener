@@ -40,8 +40,14 @@ def _headers(prefer=None):
 
 
 def signal_uid(row: dict) -> str:
-    # 跟 SQLite 的 UNIQUE(symbol, direction, candle_time) 一樣
-    return f"{row['symbol']}|{row['direction']}|{row['candle_time']}"
+    # 跟 SQLite 的 UNIQUE(symbol, direction, candle_time, strategy, timeframe) 一樣。
+    # 舊的 3+1 5m 訊號維持原本的代號（雲端已經存的不會變成兩筆）；其他策略／週期在後面加上去，才不會互相蓋掉
+    uid = f"{row['symbol']}|{row['direction']}|{row['candle_time']}"
+    strat = row.get('strategy') or 'xuan'
+    tf = row.get('timeframe')
+    if strat != 'xuan' or tf not in (None, '5m'):
+        uid += f"|{strat}|{tf or ''}"
+    return uid
 
 
 def tv_uid(row: dict) -> str:
