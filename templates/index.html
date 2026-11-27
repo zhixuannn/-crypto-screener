@@ -253,6 +253,7 @@
         .tile .t-sub { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
         .tile.good { border-color: var(--long); }
         .lk-lights-tile { grid-column: span 2; }
+        .lk-spark { display: block; width: 100%; height: 30px; margin: 6px 0 4px; }
         .lk-lights { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 4px; }
         .lk-light { display: flex; flex-direction: column; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; }
         .lk-light .lk-tf { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 600; color: var(--text-dim); }
@@ -1205,6 +1206,53 @@
             var sessTile = '<div class="tile ' + (ss.good_4h ? 'good' : '') + '"><div class="t-label">目前時段</div>' +
                            '<div class="t-val">' + escapeHtml(ss.label) + '</div>' +
                            '<div class="t-sub">4H 第 ' + ss.hour_in_4h + ' 小時' + (ss.good_4h ? '（最佳時段）' : (ss.hour_in_4h === 4 ? '（回調段，小心）' : '')) + '</div></div>';
+            // 合約數據：BingX 資金費率、持倉量；OKX 多空人數比、CVD（15 分鐘趨勢）
+            function fmtUsd(v) {
+                var a = Math.abs(v), sign = v < 0 ? '−' : '';
+                if (a >= 1e9) return sign + '$' + (a / 1e9).toFixed(2) + 'B';
+                if (a >= 1e6) return sign + '$' + (a / 1e6).toFixed(2) + 'M';
+                if (a >= 1e3) return sign + '$' + (a / 1e3).toFixed(1) + 'K';
+                return sign + '$' + a.toFixed(0);
+            }
+            function spark(series, trend) {
+                if (!series || series.length < 2) return '';
+                var W = 120, H = 30, mn = Math.min.apply(null, series), mx = Math.max.apply(null, series);
+                if (mx === mn) { mx += 1; mn -= 1; }
+                var pts = series.map(function(v, i) {
+                    return (i * W / (series.length - 1)).toFixed(1) + ',' + (H - 2 - (v - mn) / (mx - mn) * (H - 4)).toFixed(1);
+                }).join(' ');
+                var col = trend === 'up' ? 'var(--long)' : trend === 'down' ? 'var(--short)' : 'var(--text-dim)';
+                return '<svg class="lk-spark" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" aria-hidden="true"><polyline points="' + pts + '" fill="none" style="stroke:' + col + '" stroke-width="1.6" stroke-linejoin="round"/></svg>';
+            }
+            function derivTiles(m, okx) {
+                var h = '';
+                var fr = m.funding_rate;
+                h += '<div class="tile"><div class="t-label">資金費率（BingX）</div>' +
+                     (fr == null ? '<div class="t-val none">— 無資料</div>' :
+                      '<div class="t-val ' + (fr > 0 ? 'long' : fr < 0 ? 'short' : 'none') + ' mono">' + (fr >= 0 ? '+' : '') + (fr * 100).toFixed(4) + '%</div>' +
+                      '<div class="t-sub">' + (fr > 0 ? '做多的付錢給做空的' : fr < 0 ? '做空的付錢給做多的' : '多空打平') + '</div>') + '</div>';
+                var oi = m.open_interest;
+                h += '<div class="tile"><div class="t-label">持倉量 OI（BingX）</div>' +
+                     (oi == null ? '<div class="t-val none">— 無資料</div>' : '<div class="t-val mono">' + fmtUsd(oi) + '</div><div class="t-sub">還沒平倉的合約總值</div>') + '</div>';
+                if (!okx || !okx.ok) {
+                    return h + '<div class="tile lk-lights-tile"><div class="t-label">多空人數比・CVD（OKX 15m）</div><div class="t-val none">— ' + escapeHtml((okx && okx.error) || '無資料') + '</div></div>';
+                }
+                var ls = okx.ls;
+                if (ls) {
+                    var w = ls.trend === 'up' ? '▲ 做多的人變多' : ls.trend === 'down' ? '▼ 做多的人變少' : '— 差不多';
+                    h += '<div class="tile"><div class="t-label">多空人數比（OKX 15m）</div>' +
+                         '<div class="t-val ' + (ls.trend === 'up' ? 'long' : ls.trend === 'down' ? 'short' : 'none') + '"><span class="mono">' + ls.now.toFixed(2) + '</span> ' + w + '</div>' +
+                         spark(ls.series, ls.trend) + '<div class="t-sub">1 小時前 <b class="mono">' + ls.before.toFixed(2) + '</b>・線是近 6 小時</div></div>';
+                }
+                var c = okx.cvd;
+                if (c) {
+                    var w2 = c.trend === 'up' ? '▲ 買方在推' : c.trend === 'down' ? '▼ 賣方在推' : '— 買賣差不多';
+                    h += '<div class="tile"><div class="t-label">CVD（OKX 15m）</div>' +
+                         '<div class="t-val ' + (c.trend === 'up' ? 'long' : c.trend === 'down' ? 'short' : 'none') + '">' + w2 + '</div>' +
+                         spark(c.series, c.trend) + '<div class="t-sub">近 1 小時淨買 <b class="mono">' + fmtUsd(c.delta_1h) + '</b>・線是近 6 小時</div></div>';
+                }
+                return h;
+            }
             // 斐波那契 0.5：昨天日 K 高低點的一半，看現在價格在上面還是下面
             function fibTile(f) {
                 if (!f) return '<div class="tile"><div class="t-label">FIB 0.5（昨天日K）</div><div class="t-val none">— 無資料</div></div>';
@@ -1231,6 +1279,7 @@
                 biasTile('日線偏見', r.bias['1d']) + biasTile('6H 偏見', r.bias['6h']) +
                 biasTile('4H 偏見', r.bias['4h']) + biasTile('1H 偏見', r.bias['1h']) +
                 fibTile(r.fib) +
+                derivTiles(r.market || {}, r.okx) +
                 structTile('15 分結構', r.structure['15m']) + sessTile +
                 '<div class="tile"><div class="t-label">偏見完成了沒</div><div class="t-val" style="font-size:13px;">多：' + escapeHtml((r.pending || {}).long || '-') + '<br>空：' + escapeHtml((r.pending || {}).short || '-') + '</div></div>' +
                 '<div class="tile"><div class="t-label">4H 流動性獵取</div><div class="t-val" style="font-size:13px;">多：' + escapeHtml((r.sweep || {}).long || '-') + '<br>空：' + escapeHtml((r.sweep || {}).short || '-') + '</div></div>' +
