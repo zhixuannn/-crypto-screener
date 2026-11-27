@@ -34,7 +34,9 @@ def init_db():
                 detected_at INTEGER NOT NULL,
                 status TEXT NOT NULL DEFAULT 'open',
                 closed_at INTEGER,
-                UNIQUE(symbol, direction, candle_time)
+                strategy TEXT NOT NULL DEFAULT 'xuan',
+                timeframe TEXT,
+                UNIQUE(symbol, direction, candle_time, strategy, timeframe)
             )
         ''')
         for col_name, col_type in [
@@ -53,11 +55,26 @@ def init_db():
             ('tv_confirmed', 'INTEGER NOT NULL DEFAULT 0'),
             ('source', 'TEXT'),
             ('snapshot', 'TEXT'),   # 盤面紀錄（K 棒＋當下數據，JSON）
+            ('lights', 'TEXT'),     # 偏見紅綠燈：訊號當下 15m/30m/1h/4h/1d 的偏見，JSON {"15m": 1 多 / -1 空 / 0 看不出來}
         ]:
             try:
                 conn.execute(f'ALTER TABLE signals ADD COLUMN {col_name} {col_type}')
             except sqlite3.OperationalError:
                 pass
+
+        # 舊表的「不能重複」只看 幣種＋方向＋K棒時間，5m 和 15m（或 3+1 和流動性）同一根時間會撞在一起存不進去。
+        # 改成連策略、週期一起看：整張表照原樣複製一份新的（資料全部保留）再換掉。
+        old_sql = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'signals'").fetchone()[0]
+        if 'UNIQUE(symbol, direction, candle_time)' in old_sql:
+            new_sql = old_sql.replace('CREATE TABLE signals', 'CREATE TABLE signals_new', 1).replace(
+                'UNIQUE(symbol, direction, candle_time)', 'UNIQUE(symbol, direction, candle_time, strategy, timeframe)')
+            cols = ', '.join(r[1] for r in conn.execute('PRAGMA table_info(signals)'))
+            conn.execute('DROP TABLE IF EXISTS signals_new')
+            conn.execute(new_sql)
+            conn.execute(f'INSERT INTO signals_new ({cols}) SELECT {cols} FROM signals')
+            conn.execute('DROP TABLE signals')
+            conn.execute('ALTER TABLE signals_new RENAME TO signals')
+            conn.commit()
 
         conn.execute('''
             CREATE TABLE IF NOT EXISTS symbol_state (
@@ -151,8 +168,9 @@ def record_signal(symbol: str, direction: str, entry_price: float, sl_price: flo
                  oi_score, cvd_score, total_score, score_note, score_max, score_detail, warning, source)
             )
             conn.commit()
-            row = conn.execute('SELECT * FROM signals WHERE symbol = ? AND direction = ? AND candle_time = ?',
-                               (symbol, direction, candle_time)).fetchone()
+            row = conn.execute("SELECT * FROM signals WHERE symbol = ? AND direction = ? AND candle_time = ? "
+                               "AND strategy = ? AND COALESCE(timeframe, '') = COALESCE(?, '')",
+                               (symbol, direction, candle_time, strategy, timeframe)).fetchone()
             if row:
                 cloud_backup.push('signal', [dict(row)])
                 return row['id']
@@ -295,6 +313,66 @@ def set_snapshot(signal_id: int, part: dict):
         cloud_backup.push('signal', [dict(full)])
 
 
+def set_lights(signal_id: int, lights: dict):
+    """記下這筆訊號當下的偏見紅綠燈，並備份到雲端。"""
+    with _lock:
+        conn = get_connection()
+        conn.execute('UPDATE signals SET lights = ? WHERE id = ?', (json.dumps(lights), signal_id))
+        conn.commit()
+        full = conn.execute('SELECT * FROM signals WHERE id = ?', (signal_id,)).fetchone()
+        conn.close()
+    if full:
+        cloud_backup.push('signal', [dict(full)])
+
+
+LIGHT_TFS = ('15m', '30m', '1h', '4h', '1d')
+LIGHT_NAMES = {'15m': '15m', '30m': '30m', '1h': '1H', '4h': '4H', '1d': 'D'}
+
+
+def _lights_stats(rows) -> dict:
+    """紅綠燈統計：順勢燈數 0~5 各自的勝率，以及每個時區順勢／逆勢的勝率。只算有記錄燈號的訊號。"""
+    by_count = {}
+    by_tf = {tf: {'with': [0, 0, 0.0], 'against': [0, 0, 0.0]} for tf in LIGHT_TFS}
+    n = 0
+    for r in rows:
+        try:
+            lights = json.loads(r['lights']) if r['lights'] else None
+        except Exception:
+            lights = None
+        if not lights:
+            continue
+        n += 1
+        want = 1 if r['direction'] == 'long' else -1
+        win = r['status'] == 'tp_hit'
+        rm = _row_r_multiple(r)
+        aligned = 0
+        for tf in LIGHT_TFS:
+            v = lights.get(tf)
+            if v not in (1, -1):
+                continue
+            key = 'with' if v == want else 'against'
+            if v == want:
+                aligned += 1
+            b = by_tf[tf][key]
+            b[0] += 1
+            b[1] += 1 if win else 0
+            b[2] += rm
+        c = by_count.setdefault(aligned, [0, 0, 0.0])
+        c[0] += 1
+        c[1] += 1 if win else 0
+        c[2] += rm
+
+    def pack(b):
+        return {'total': b[0], 'win_rate': (b[1] / b[0] * 100) if b[0] else 0.0, 'r': b[2]}
+
+    return {
+        'n': n,
+        'by_count': [dict(pack(by_count[k]), label=f'{k} 顆順勢') for k in sorted(by_count, reverse=True)],
+        'by_tf': [{'tf': LIGHT_NAMES[tf], 'with': pack(by_tf[tf]['with']), 'against': pack(by_tf[tf]['against'])}
+                  for tf in LIGHT_TFS],
+    }
+
+
 def symbol_to_tradingview(symbol: str) -> str:
     base_quote = symbol.split(':')[0]
     compact = base_quote.replace('/', '')
@@ -375,7 +453,7 @@ def _row_r_multiple(r) -> float:
 
 def get_stats(start_ms: int = None, end_ms: int = None, strategy: str = None, timeframe: str = None):
     # 只取算統計需要的欄位 (不抓很長的 score_detail 文字，比較快)
-    query = ("SELECT symbol, direction, entry_price, sl_price, tp_price, status, total_score, score_max "
+    query = ("SELECT symbol, direction, entry_price, sl_price, tp_price, status, total_score, score_max, lights "
              "FROM signals WHERE status IN ('tp_hit', 'sl_hit')")
     params = []
     if strategy:
@@ -403,7 +481,7 @@ def get_stats(start_ms: int = None, end_ms: int = None, strategy: str = None, ti
 
     if not rows:
         return {'total': 0, 'wins': 0, 'losses': 0, 'win_rate': 0.0, 'total_r': 0.0,
-                'curve': [], 'by_score': []}, []
+                'curve': [], 'by_score': [], 'by_lights': {'n': 0, 'by_count': [], 'by_tf': []}}, []
 
     by_symbol = {}
     total_r = 0.0
@@ -469,6 +547,7 @@ def get_stats(start_ms: int = None, end_ms: int = None, strategy: str = None, ti
         'total_r': total_r,
         'curve': curve[-300:],
         'by_score': by_score,
+        'by_lights': _lights_stats(rows),
     }
 
     per_symbol = []
@@ -516,11 +595,14 @@ def restore_from_cloud() -> dict:
             if cur.rowcount:
                 added_s += 1
             elif d.get('status') and d.get('status') != 'open':
-                conn.execute("UPDATE signals SET status = ?, closed_at = ? WHERE symbol = ? AND direction = ? AND candle_time = ? AND status = 'open'",
-                             (d['status'], d.get('closed_at'), d['symbol'], d['direction'], d['candle_time']))
+                conn.execute("UPDATE signals SET status = ?, closed_at = ? WHERE symbol = ? AND direction = ? AND candle_time = ? "
+                             "AND strategy = ? AND COALESCE(timeframe, '') = COALESCE(?, '') AND status = 'open'",
+                             (d['status'], d.get('closed_at'), d['symbol'], d['direction'], d['candle_time'],
+                              d.get('strategy') or 'xuan', d.get('timeframe')))
             if d.get('tv_confirmed'):
-                conn.execute('UPDATE signals SET tv_confirmed = 1 WHERE symbol = ? AND direction = ? AND candle_time = ?',
-                             (d['symbol'], d['direction'], d['candle_time']))
+                conn.execute("UPDATE signals SET tv_confirmed = 1 WHERE symbol = ? AND direction = ? AND candle_time = ? "
+                             "AND strategy = ? AND COALESCE(timeframe, '') = COALESCE(?, '')",
+                             (d['symbol'], d['direction'], d['candle_time'], d.get('strategy') or 'xuan', d.get('timeframe')))
         for d in sorted(tvs, key=lambda x: x.get('received_at') or 0):
             cols = [c for c in t_cols if c in d]
             cur = conn.execute(f'INSERT OR IGNORE INTO tv_alerts ({",".join(cols)}) VALUES ({",".join("?" * len(cols))})',
