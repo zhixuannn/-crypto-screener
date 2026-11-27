@@ -19,6 +19,7 @@ import smc_structure
 import bias
 import database
 import snapshot
+import okx_data
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +102,23 @@ def lookup(raw_symbol: str) -> dict:
             logger.warning(f'[查幣] {symbol} 6H K線失敗: {e}')
             return None
 
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    def job_market():   # BingX 資金費率、持倉量
+        try:
+            return snapshot.market_data(symbol)
+        except Exception as e:
+            logger.warning(f'[查幣] {symbol} 合約數據失敗: {e}')
+            return {}
+
+    def job_okx():      # OKX 多空人數比、CVD（15 分鐘）
+        try:
+            return okx_data.flow(base)
+        except Exception as e:
+            logger.warning(f'[查幣] {base} OKX 失敗: {e}')
+            return {'ok': False, 'error': 'OKX 數據暫時抓不到'}
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        f_market = pool.submit(job_market)
+        f_okx = pool.submit(job_okx)
         f_ticker = pool.submit(job_ticker)
         f_gather = pool.submit(xuan_scoring.gather, symbol, '5m')
         f_lights = pool.submit(job_lights)
@@ -110,6 +127,8 @@ def lookup(raw_symbol: str) -> dict:
         inputs = f_gather.result()
         lights = f_lights.result()
         c6h = f_6h.result()
+        market = f_market.result() or {}
+        okx = f_okx.result()
 
     now_ms = int(time.time() * 1000)
     candles = inputs['candles']
@@ -158,6 +177,8 @@ def lookup(raw_symbol: str) -> dict:
         'open_signal': database.get_open_signal_for_symbol(symbol),
         'lights': lights,
         'fib': fib,
+        'market': {'funding_rate': market.get('funding_rate'), 'open_interest': market.get('open_interest')},
+        'okx': okx,
         'incomplete': inputs['incomplete'],
         'cached': False,
         'ts': now_ms,
