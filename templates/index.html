@@ -114,7 +114,9 @@
 
         /* ---------- 訊號卡片 ---------- */
         .signal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
-        .signal-card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 18px; transition: border-color 0.15s; }
+        .signal-card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 18px; transition: border-color 0.15s; display: flex; flex-direction: column; }
+        /* 價格、目前實盤、底部按鈕一律貼齊卡片底部，同一排卡片就會對齊（不管上面有沒有「要小心」） */
+        .signal-card .price-boxes { margin-top: auto; }
         .signal-card:hover { border-color: var(--text-dim); }
 
         .sc-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 10px; }
@@ -250,6 +252,13 @@
         .tile .t-val.long { color: var(--long); } .tile .t-val.short { color: var(--short); } .tile .t-val.none { color: var(--text-dim); }
         .tile .t-sub { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
         .tile.good { border-color: var(--long); }
+        .lk-lights-tile { grid-column: span 2; }
+        .lk-lights { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 4px; }
+        .lk-light { display: flex; flex-direction: column; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; }
+        .lk-light .lk-tf { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 600; color: var(--text-dim); }
+        .lk-light .tip-dot { width: 14px; height: 14px; border-radius: 50%; display: inline-block; background: var(--border); }
+        .lk-light .tip-dot.up { background: var(--long); } .lk-light .tip-dot.dn { background: var(--short); }
+        .lk-light .up-t { color: var(--long); } .lk-light .dn-t { color: var(--short); }
         .score-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
         .score-col { background: var(--cell); border-radius: 14px; padding: 14px 16px 6px; }
         .score-col h4 { margin: 0 0 12px; font-size: 14px; }
@@ -1196,9 +1205,33 @@
             var sessTile = '<div class="tile ' + (ss.good_4h ? 'good' : '') + '"><div class="t-label">目前時段</div>' +
                            '<div class="t-val">' + escapeHtml(ss.label) + '</div>' +
                            '<div class="t-sub">4H 第 ' + ss.hour_in_4h + ' 小時' + (ss.good_4h ? '（最佳時段）' : (ss.hour_in_4h === 4 ? '（回調段，小心）' : '')) + '</div></div>';
+            // 斐波那契 0.5：昨天日 K 高低點的一半，看現在價格在上面還是下面
+            function fibTile(f) {
+                if (!f) return '<div class="tile"><div class="t-label">FIB 0.5（昨天日K）</div><div class="t-val none">— 無資料</div></div>';
+                var up = f.side === 'above', dn = f.side === 'below';
+                var where = up ? '▲ 在上面' : dn ? '▼ 在下面' : '— 剛好在 0.5';
+                var dist = f.dist_pct == null ? '' : '（' + (f.dist_pct >= 0 ? '+' : '') + f.dist_pct.toFixed(2) + '%）';
+                return '<div class="tile"><div class="t-label">FIB 0.5（昨天日K）</div>' +
+                       '<div class="t-val ' + (up ? 'long' : dn ? 'short' : 'none') + '">' + where + '</div>' +
+                       '<div class="t-sub">0.5 價位 <b class="mono">' + formatPrice(f.level) + '</b> ' + dist + '</div></div>';
+            }
+            // 偏見紅綠燈：15m／30m／1H／4H／D 五顆燈（跟訊號卡片、TradingView 指標同一套）
+            function lightsTile(lights) {
+                var cells = '';
+                for (var i = 0; i < LIGHT_TFS.length; i++) {
+                    var v = lights ? lights[LIGHT_TFS[i][0]] : null;
+                    var cls = v === 1 ? 'up' : v === -1 ? 'dn' : '';
+                    var word = v === 1 ? '多' : v === -1 ? '空' : '—';
+                    cells += '<div class="lk-light"><span class="lk-tf">' + LIGHT_TFS[i][1] + '</span><i class="tip-dot ' + cls + '"></i><span class="' + (cls ? cls + '-t' : '') + '">' + word + '</span></div>';
+                }
+                return '<div class="tile lk-lights-tile"><div class="t-label">偏見紅綠燈</div><div class="lk-lights">' + cells + '</div></div>';
+            }
             var tiles = '<div class="tile-grid">' +
-                biasTile('日線偏見', r.bias['1d']) + biasTile('4H 偏見', r.bias['4h']) +
-                structTile('15 分結構', r.structure['15m']) + structTile('5 分結構', r.structure['5m']) + sessTile +
+                lightsTile(r.lights) +
+                biasTile('日線偏見', r.bias['1d']) + biasTile('6H 偏見', r.bias['6h']) +
+                biasTile('4H 偏見', r.bias['4h']) + biasTile('1H 偏見', r.bias['1h']) +
+                fibTile(r.fib) +
+                structTile('15 分結構', r.structure['15m']) + sessTile +
                 '<div class="tile"><div class="t-label">偏見完成了沒</div><div class="t-val" style="font-size:13px;">多：' + escapeHtml((r.pending || {}).long || '-') + '<br>空：' + escapeHtml((r.pending || {}).short || '-') + '</div></div>' +
                 '<div class="tile"><div class="t-label">4H 流動性獵取</div><div class="t-val" style="font-size:13px;">多：' + escapeHtml((r.sweep || {}).long || '-') + '<br>空：' + escapeHtml((r.sweep || {}).short || '-') + '</div></div>' +
                 '</div>';
