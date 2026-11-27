@@ -22,6 +22,7 @@ import scoring
 import xuan_scoring
 import binance_data
 import snapshot
+import liquidity
 import json
 import hmac
 import re
@@ -42,6 +43,8 @@ SWING_LENGTH = int(os.environ.get('SWING_LENGTH', '5'))
 BOOTSTRAP_CANDLE_LIMIT = int(os.environ.get('BOOTSTRAP_CANDLE_LIMIT', '1000'))
 MAX_WORKERS = int(os.environ.get('SCAN_MAX_WORKERS', '5'))
 TP_RR = float(os.environ.get('TP_RR', '1.0'))
+# 流動性策略：跟 3+1 掃同一批幣、同樣的週期；先只記錄不發通知（要發就在 Render 設 LIQ_NOTIFY_TIMEFRAMES=5m 之類）
+LIQ_NOTIFY_TIMEFRAMES = {t.strip() for t in os.environ.get('LIQ_NOTIFY_TIMEFRAMES', '').split(',') if t.strip()}
 
 STABLECOIN_SYMBOLS = {
     'USDT', 'USDC', 'DAI', 'BUSD', 'TUSD', 'USDD',
@@ -109,7 +112,7 @@ def _scan_one_symbol_stateful_impl(symbol: str, tf: str = None, force: bool = Fa
             # 還不可能有新的收盤 K 棒就不去問 BingX（15m 每 15 分鐘才需要抓一次，省一半以上的請求）
             step = TF_MS.get(tf)
             if step and time.time() * 1000 < state_row[1] + 2 * step + 3000:
-                return symbol, []
+                return symbol, [], []
         exchange = exchange_client.get_exchange()
 
         if is_new:
@@ -117,12 +120,13 @@ def _scan_one_symbol_stateful_impl(symbol: str, tf: str = None, force: bool = Fa
                 exchange, symbol, timeframe=TIMEFRAME_, limit=BOOTSTRAP_CANDLE_LIMIT
             )
             if len(candles) < SWING_LENGTH * 3:
-                return symbol, []
+                return symbol, [], []
             state = strategy.new_state(swing_len=SWING_LENGTH)
             state, _bootstrap_signals = strategy.advance_state(state, candles, rr=TP_RR)
             last_candle_time = candles[-1][0]
             logger.info(f'[XUAN] {symbol} {tf} 新幣種初始化完成，用了 {len(candles)} 根歷史K棒補記憶')
             result_signals = []
+            new_candles = candles
         else:
             state_json, last_candle_time = state_row
             state = strategy.state_from_json(state_json)
@@ -130,17 +134,40 @@ def _scan_one_symbol_stateful_impl(symbol: str, tf: str = None, force: bool = Fa
                 exchange, symbol, timeframe=TIMEFRAME_, since_ms=last_candle_time
             )
             if not new_candles:
-                return symbol, []
+                return symbol, [], []
             state, result_signals = strategy.advance_state(state, new_candles, rr=TP_RR)
             last_candle_time = new_candles[-1][0]
 
         database.save_symbol_state(
             key, strategy.state_to_json(state), last_candle_time, int(time.time() * 1000)
         )
-        return symbol, result_signals
+        liq_signals = _advance_liquidity(exchange, symbol, tf, new_candles, bootstrap=is_new)
+        return symbol, result_signals, liq_signals
     except Exception as e:
         logger.warning(f'[XUAN] 掃描 {symbol} {tf} 失敗: {e}')
-        return symbol, []
+        return symbol, [], []
+
+
+def _advance_liquidity(exchange, symbol: str, tf: str, new_candles: list, bootstrap: bool) -> list:
+    """流動性策略：跟 3+1 共用同一批新 K 棒（不多打 BingX）。第一次遇到這個幣時用歷史 K 棒補記憶，不出訊號。"""
+    key = f'liq|{symbol}|{tf}'
+    try:
+        row = database.get_symbol_state(key)
+        if row is None:
+            candles = new_candles if bootstrap else exchange_client.fetch_closed_candles(
+                exchange, symbol, timeframe=tf, limit=BOOTSTRAP_CANDLE_LIMIT)
+            if not candles:
+                return []
+            st, _ = liquidity.advance(liquidity.new_state(SWING_LENGTH), candles, rr=TP_RR)
+            sigs = []
+        else:
+            st, sigs = liquidity.advance(liquidity.state_from_json(row[0]), new_candles, rr=TP_RR)
+        if st.get('last_time'):
+            database.save_symbol_state(key, liquidity.state_to_json(st), st['last_time'], int(time.time() * 1000))
+        return sigs
+    except Exception as e:
+        logger.warning(f'[流動性] 掃描 {symbol} {tf} 失敗: {e}')
+        return []
 
 
 # ==================== 每個幣種一把鎖 (排程掃描 和 TV 警報觸發 不會同時改同一個幣種的狀態) ====================
@@ -163,8 +190,9 @@ def scan_one_symbol_stateful(symbol: str, tf: str = None, force: bool = False):
         return _scan_one_symbol_stateful_impl(symbol, tf, force)
 
 
-def tf_label(tf) -> str:
-    return f'XUAN 3+1 · {tf or TIMEFRAME}'
+def tf_label(tf, strategy: str = 'xuan') -> str:
+    name = '流動性' if strategy == 'liq' else 'XUAN 3+1'
+    return f'{name} · {tf or TIMEFRAME}'
 
 
 # ==================== 未平倉檢查 ====================
@@ -172,7 +200,7 @@ def tf_label(tf) -> str:
 def check_open_signal(row: dict):
     symbol = row['symbol']
     tf = row.get('timeframe') or TIMEFRAME
-    strategy_label = tf_label(tf)
+    strategy_label = tf_label(tf, row.get('strategy') or 'xuan')
     try:
         exchange = exchange_client.get_exchange()
         candles = exchange_client.fetch_closed_candles(exchange, symbol, timeframe=TIMEFRAME, limit=2)
@@ -202,7 +230,8 @@ def check_open_signal(row: dict):
             closed_at = int(time.time() * 1000)
             database.close_signal(row['id'], status, closed_at)
             snapshot.capture_exit(row['id'], symbol, tf, row['candle_time'], closed_at)
-            if tf in NOTIFY_TIMEFRAMES:
+            notify_set = LIQ_NOTIFY_TIMEFRAMES if row.get('strategy') == 'liq' else NOTIFY_TIMEFRAMES
+            if tf in notify_set:
                 message = notifier.format_close_message(symbol, direction, status, row['entry_price'], exit_price, strategy_label=strategy_label)
                 notifier.send_telegram_message(message)
             logger.info(f'[{strategy_label}] {symbol} {direction} 已{"止盈" if hit_tp else "止損"}')
@@ -211,7 +240,7 @@ def check_open_signal(row: dict):
 
 
 def check_open_signals():
-    open_signals = [r for r in database.get_open_signals() if r.get('strategy', 'xuan') == 'xuan']
+    open_signals = [r for r in database.get_open_signals() if (r.get('strategy') or 'xuan') in ('xuan', 'liq')]
     if not open_signals:
         return
     logger.info(f'檢查 {len(open_signals)} 筆未平倉訊號...')
@@ -287,6 +316,47 @@ def process_signals(symbol: str, signals: list, timeframe: str, source: str = 's
     return counts
 
 
+def _daily_bias(symbol: str, ref_ms: int):
+    """日偏見（跟紅綠燈的 D 同一套），回傳 'long' / 'short' / None。"""
+    v = snapshot.compute_lights(symbol, ref_ms, tfs=('1d',)).get('1d')
+    return 'long' if v == 1 else 'short' if v == -1 else None
+
+
+def process_liq_signals(symbol: str, signals: list, timeframe: str) -> dict:
+    """
+    流動性訊號：日偏見順勢才記錄（逆勢的丟掉）-> 記錄 -> 盤面／紅綠燈。
+    沒有分數、同一隻幣可以同時有好幾筆（照流動性策略的設定，不限同時單數）。
+    """
+    counts = {'found': 0, 'against_bias': 0}
+    step = TF_MS.get(timeframe, 300_000)
+    for signal in signals:
+        if database.signal_already_recorded(symbol, signal.direction, signal.candle_time, strategy='liq', timeframe=timeframe):
+            continue
+        try:
+            bias_dir = _daily_bias(symbol, signal.candle_time + step)
+        except Exception as e:
+            logger.warning(f'[流動性] {symbol} 日偏見抓不到，這筆不記: {e}')
+            continue
+        if bias_dir != signal.direction:
+            counts['against_bias'] += 1
+            continue
+        with _signal_lock:
+            signal_id = database.record_signal(
+                symbol, signal.direction, signal.entry_price, signal.sl_price, signal.tp_price,
+                signal.candle_time, int(time.time() * 1000), strategy='liq', timeframe=timeframe, source='site')
+        if not signal_id:
+            continue
+        snapshot.capture_entry(signal_id, symbol, timeframe, signal.candle_time)
+        counts['found'] += 1
+        logger.info(f'[{tf_label(timeframe, "liq")}] 新訊號: {symbol} {signal.direction} @ {signal.entry_price} SL {signal.sl_price}')
+        if timeframe in LIQ_NOTIFY_TIMEFRAMES:
+            message = notifier.format_signal_message(
+                symbol, signal.direction, signal.entry_price, signal.sl_price, signal.tp_price, timeframe,
+                strategy_label=tf_label(timeframe, 'liq'), score=None, source='site')
+            notifier.send_telegram_message(message)
+    return counts
+
+
 # ==================== 主掃描流程 ====================
 
 def scan_market():
@@ -311,13 +381,17 @@ def scan_market():
     found_count = 0
     skipped_already_open = 0
     blocked_by_score = 0
+    liq_found = 0
 
     t_scan0 = time.time()
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
         futures = {pool.submit(scan_one_symbol_stateful, s, tf): tf for s in symbols for tf in SCAN_TIMEFRAMES}
         for future in as_completed(futures):
-            symbol, signals = future.result()
+            symbol, signals, liq_signals = future.result()
             c = process_signals(symbol, signals, futures[future])
+            if liq_signals:
+                lc = process_liq_signals(symbol, liq_signals, futures[future])
+                liq_found += lc['found']
             found_count += c['found']
             skipped_already_open += c['skipped_open']
             blocked_by_score += c['blocked']
@@ -325,7 +399,7 @@ def scan_market():
     elapsed = time.time() - start_time
     logger.info(f'掃描完成，總耗時 {elapsed:.1f} 秒 (檢查未平倉 {t_check:.1f} 秒＋掃描幣種 {time.time() - t_scan0:.1f} 秒)，'
                 f'共 {found_count} 個新訊號，{skipped_already_open} 個因已有未平倉訊號被跳過，'
-                f'{blocked_by_score} 個因分數低於門檻被擋下 (門檻 {scoring.SCORE_MIN})')
+                f'{blocked_by_score} 個因分數低於門檻被擋下 (門檻 {scoring.SCORE_MIN})；流動性新訊號 {liq_found} 個')
 
 
 # ==================== 資料整理 (給前端用) ====================
@@ -371,6 +445,10 @@ def _prepare_signals(signals, now_ms):
         except Exception:
             s['score_detail'] = []
         s['score_max'] = s.get('score_max') or 40
+        try:
+            s['lights'] = json.loads(s['lights']) if s.get('lights') else None
+        except Exception:
+            s['lights'] = None
     return signals
 
 
@@ -424,15 +502,15 @@ _stats_cache = {}                 # (start, end) -> (時間, overall, per_symbol
 _stats_lock = threading.Lock()
 
 
-def _get_stats_cached(start_ms, end_ms, tf=None):
+def _get_stats_cached(start_ms, end_ms, tf=None, strat='xuan'):
     """統計：同樣的時間範圍 30 秒內不重算。起訖時間取到『分鐘』，這樣『今天』這種範圍才會命中快取。"""
-    key = (None if start_ms is None else start_ms // 60000, None if end_ms is None else end_ms // 60000, tf)
+    key = (None if start_ms is None else start_ms // 60000, None if end_ms is None else end_ms // 60000, tf, strat)
     now = time.time()
     with _stats_lock:
         hit = _stats_cache.get(key)
         if hit and now - hit[0] < STATS_TTL:
             return hit[1], hit[2]
-    overall, per_symbol = database.get_stats(start_ms, end_ms, strategy='xuan', timeframe=tf)
+    overall, per_symbol = database.get_stats(start_ms, end_ms, strategy=strat, timeframe=tf)
     with _stats_lock:
         _stats_cache[key] = (now, overall, per_symbol)
         if len(_stats_cache) > 50:
@@ -441,12 +519,13 @@ def _get_stats_cached(start_ms, end_ms, tf=None):
     return overall, per_symbol
 
 
-def build_dashboard_data(start_ms=None, end_ms=None, tf=None) -> dict:
+def build_dashboard_data(start_ms=None, end_ms=None, tf=None, strat='xuan') -> dict:
+    """strat：'xuan'（3+1）或 'liq'（流動性）。回傳的欄位名稱沿用 xuan_*，內容是選到的策略。"""
     t0 = time.time()
     now_ms = int(t0 * 1000)
     timing = {}
 
-    xuan_signals = _prepare_signals(database.get_recent_signals(limit=200, strategy='xuan'), now_ms)
+    xuan_signals = _prepare_signals(database.get_recent_signals(limit=200, strategy=strat), now_ms)
     xuan_open = [s for s in xuan_signals if s['status'] == 'open']
     xuan_closed = [s for s in xuan_signals if s['status'] != 'open']
     timing['signals'] = int((time.time() - t0) * 1000)
@@ -464,7 +543,7 @@ def build_dashboard_data(start_ms=None, end_ms=None, tf=None) -> dict:
         symbols_updated_str = dt.astimezone().strftime('%Y-%m-%d %H:%M')
 
     t2 = time.time()
-    xuan_overall, xuan_per_symbol = _get_stats_cached(start_ms, end_ms, tf)
+    xuan_overall, xuan_per_symbol = _get_stats_cached(start_ms, end_ms, tf, strat)
     timing['stats'] = int((time.time() - t2) * 1000)
     timing['total'] = int((time.time() - t0) * 1000)
     logger.info(f'[載入速度] /api/data 共 {timing["total"]} ms (訊號 {timing["signals"]}／即時價 {timing["prices"]}／統計 {timing["stats"]})')
@@ -482,6 +561,7 @@ def build_dashboard_data(start_ms=None, end_ms=None, tf=None) -> dict:
         'timeframes': SCAN_TIMEFRAMES,
         'notify_timeframes': sorted(NOTIFY_TIMEFRAMES),
         'stats_tf': tf or 'all',
+        'strategy': strat,
         'timing_ms': timing,
     }
 
@@ -527,8 +607,10 @@ def handle_tv_alert(alert_id: int, symbol: str, timeframe: str, direction: str):
     matched = False
     try:
         for attempt in range(3):
-            _, signals = scan_one_symbol_stateful(symbol, timeframe, force=True)
+            _, signals, liq_signals = scan_one_symbol_stateful(symbol, timeframe, force=True)
             process_signals(symbol, signals, timeframe, source='tv')
+            if liq_signals:
+                process_liq_signals(symbol, liq_signals, timeframe)
             n = database.mark_tv_confirmed(symbol, 'xuan', timeframe, direction,
                                             since_ms=int(time.time() * 1000) - 20 * 60 * 1000)
             if n:
@@ -634,7 +716,8 @@ def api_data():
     start_ms, end_ms = resolve_time_range(request.args)
     tf = request.args.get('tf')
     tf = tf if tf in SCAN_TIMEFRAMES else None
-    return jsonify(build_dashboard_data(start_ms, end_ms, tf))
+    strat = 'liq' if request.args.get('strat') == 'liq' else 'xuan'
+    return jsonify(build_dashboard_data(start_ms, end_ms, tf, strat))
 
 
 @app.route('/api/signal/<int:signal_id>/snapshot')
