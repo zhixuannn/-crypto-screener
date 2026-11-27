@@ -18,6 +18,7 @@ import xuan_scoring
 import smc_structure
 import bias
 import database
+import snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -86,11 +87,29 @@ def lookup(raw_symbol: str) -> dict:
             logger.warning(f'[查幣] {symbol} 行情失敗: {e}')
             return {'price': None, 'change_24h': None}
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
+    def job_lights():   # 偏見紅綠燈（15m/30m/1h/4h/1d），跟訊號卡片同一套
+        try:
+            return snapshot.compute_lights(symbol, int(time.time() * 1000))
+        except Exception as e:
+            logger.warning(f'[查幣] {symbol} 紅綠燈失敗: {e}')
+            return None
+
+    def job_6h():   # 6H 偏見用（評分本身沒有用到 6H，這裡另外抓）
+        try:
+            return exchange_client.fetch_closed_candles(exchange_client.get_exchange(), symbol, timeframe='6h', limit=6)
+        except Exception as e:
+            logger.warning(f'[查幣] {symbol} 6H K線失敗: {e}')
+            return None
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
         f_ticker = pool.submit(job_ticker)
         f_gather = pool.submit(xuan_scoring.gather, symbol, '5m')
+        f_lights = pool.submit(job_lights)
+        f_6h = pool.submit(job_6h)
         ticker = f_ticker.result()
         inputs = f_gather.result()
+        lights = f_lights.result()
+        c6h = f_6h.result()
 
     now_ms = int(time.time() * 1000)
     candles = inputs['candles']
@@ -99,9 +118,23 @@ def lookup(raw_symbol: str) -> dict:
     h4 = bias.hour_in_4h(hour)
 
     biases = {}
-    for tf in ('1d', '4h', '1h'):
-        c = candles.get(tf)
+    for tf in ('1d', '6h', '4h', '1h'):
+        c = c6h if tf == '6h' else candles.get(tf)
         biases[tf] = bias.bias_direction(c) if c and len(c) >= 2 else None
+
+    # 斐波那契 0.5：昨天日 K（台灣早上 8 點開盤那根，已收盤）的 (高＋低) ÷ 2，跟 3+1 指標的 FIB 0.5 一樣
+    fib = None
+    c1d = candles.get('1d')
+    if c1d:
+        day_open = now_ms // 86_400_000 * 86_400_000
+        prev = [c for c in c1d if c[0] < day_open]
+        if prev:
+            hi, lo = prev[-1][2], prev[-1][3]
+            level = (hi + lo) / 2
+            price = ticker.get('price')
+            fib = {'level': level, 'high': hi, 'low': lo,
+                   'side': None if price is None else ('above' if price > level else 'below' if price < level else 'at'),
+                   'dist_pct': None if price is None or not level else (price - level) / level * 100}
 
     score_long = xuan_scoring.score(inputs, 'long', now_ms)
     score_short = xuan_scoring.score(inputs, 'short', now_ms)
@@ -123,6 +156,8 @@ def lookup(raw_symbol: str) -> dict:
         'score_long': score_long,
         'score_short': score_short,
         'open_signal': database.get_open_signal_for_symbol(symbol),
+        'lights': lights,
+        'fib': fib,
         'incomplete': inputs['incomplete'],
         'cached': False,
         'ts': now_ms,
