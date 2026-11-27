@@ -44,7 +44,7 @@
         .nav-item.active { color: var(--text); font-weight: 600; background: var(--cell); box-shadow: inset 3px 0 0 var(--accent); }
         .nav-item:hover:not(.active) { color: var(--text); background: var(--hover); }
 
-        .main { flex: 1; padding: 28px 36px 70px; min-width: 0; max-width: 1480px; }
+        .main { flex: 1; padding: 28px 36px 70px; min-width: 0; max-width: 1600px; margin: 0 auto; }
 
         .topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; gap: 10px; flex-wrap: wrap; }
         .sidebar-toggle { background: var(--panel); border: 1px solid var(--border); color: var(--text-dim); border-radius: 10px; width: 40px; height: 40px; cursor: pointer; font-size: 15px; }
@@ -80,7 +80,14 @@
         .tf-bar.list-tf { margin: 0; font-weight: 400; }
 
         /* ---------- 偏見紅綠燈 ---------- */
-        .lights { display: inline-flex; gap: 4px; align-items: center; margin-left: 6px; vertical-align: middle; }
+        .lights { position: relative; display: inline-flex; gap: 4px; align-items: center; margin-left: 2px; padding: 6px 4px; border-radius: 6px; vertical-align: middle; cursor: help; outline: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+        .lights:hover, .lights:focus { background: var(--cell); }
+        .lights-tip { display: none; position: absolute; top: calc(100% + 6px); left: 50%; transform: translateX(-50%); z-index: 30; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; box-shadow: 0 10px 28px rgba(0,0,0,0.35); white-space: nowrap; font-size: 12px; color: var(--text); grid-template-columns: auto auto auto; gap: 6px 10px; align-items: center; cursor: default; }
+        .lights-tip .tip-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; background: var(--border); }
+        .lights-tip .tip-dot.up { background: var(--long); } .lights-tip .tip-dot.dn { background: var(--short); }
+        .lights-tip b { font-family: 'JetBrains Mono', monospace; font-weight: 600; color: var(--text-dim); }
+        .lights-tip .up-t { color: var(--long); font-weight: 700; } .lights-tip .dn-t { color: var(--short); font-weight: 700; }
+        .lights:hover .lights-tip, .lights:focus .lights-tip, .lights:active .lights-tip { display: grid; }
         .lights i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; background: var(--border); }
         .lights i.up { background: var(--long); }
         .lights i.dn { background: var(--short); }
@@ -1017,13 +1024,18 @@
 
         function lightsHtml(s) {
             if (!s.lights) return '';
-            var h = '', tip = [];
+            // 滑鼠移上去（手機：按住或點一下）會跳出每顆燈是哪個時區
+            var h = '', tip = [], rows = '';
             for (var i = 0; i < LIGHT_TFS.length; i++) {
                 var v = s.lights[LIGHT_TFS[i][0]];
-                h += '<i class="' + (v === 1 ? 'up' : v === -1 ? 'dn' : '') + '"></i>';
-                tip.push(LIGHT_TFS[i][1] + (v === 1 ? ' 多' : v === -1 ? ' 空' : ' ?'));
+                var cls = v === 1 ? 'up' : v === -1 ? 'dn' : '';
+                var word = v === 1 ? '多' : v === -1 ? '空' : '看不出來';
+                h += '<i class="' + cls + '"></i>';
+                tip.push(LIGHT_TFS[i][1] + ' ' + word);
+                rows += '<b>' + LIGHT_TFS[i][1] + '</b><i class="tip-dot ' + cls + '"></i><span class="' + (cls ? cls + '-t' : '') + '">' + word + '</span>';
             }
-            return '<span class="lights" title="' + tip.join('　') + '">' + h + '</span>';
+            return '<span class="lights" tabindex="0" role="img" aria-label="偏見紅綠燈：' + tip.join('，') + '">' + h +
+                   '<span class="lights-tip" aria-hidden="true">' + rows + '</span></span>';
         }
 
         function statRowHtml(label, b) {
