@@ -91,9 +91,19 @@
         .range-bar.custom-mode input[type="date"] { display: inline-block; }
         .tf-bar { display: flex; align-items: center; gap: 6px; margin: -6px 0 18px; font-size: 12px; color: var(--text-dim); flex-wrap: wrap; }
         .tf-btn { background: var(--panel); color: var(--text-dim); border: 1px solid var(--border); border-radius: 999px; padding: 6px 14px; font-size: 12px; cursor: pointer; font-family: inherit; }
+        .strat-btn { background: var(--panel); color: var(--text-dim); border: 1px solid var(--border); border-radius: 999px; padding: 6px 14px; font-size: 12px; cursor: pointer; font-family: inherit; }
+        .strat-btn.active { color: var(--cyan); border-color: var(--cyan); box-shadow: 0 0 10px rgba(25,227,255,0.2); }
+        .sh-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .tf-bar.list-tf { margin: 0; font-family: 'Noto Sans TC', sans-serif; letter-spacing: 0; font-weight: 400; }
         .tf-btn.active { color: var(--magenta); border-color: var(--magenta); box-shadow: 0 0 10px rgba(255,61,240,0.2); }
 
         /* ---------- 盤面紀錄 ---------- */
+        /* ---------- 偏見紅綠燈 ---------- */
+        .lights { display: inline-flex; gap: 3px; align-items: center; margin-left: 6px; vertical-align: middle; }
+        .lights i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: #555; }
+        .lights i.up { background: #22C55E; box-shadow: 0 0 6px rgba(34,197,94,0.6); }
+        .lights i.dn { background: #EF4444; box-shadow: 0 0 6px rgba(239,68,68,0.6); }
+        .lights-sub { font-size: 12px; color: var(--text-dim); margin: 14px 0 6px; }
         .snap-btn { font-size: 11px; font-weight: 700; color: var(--text-dim); background: none; border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; cursor: pointer; font-family: inherit; }
         .snap-btn:hover { color: var(--magenta); border-color: var(--magenta); box-shadow: 0 0 10px rgba(255,61,240,0.25); }
         .sc-links { display: flex; gap: 6px; align-items: center; }
@@ -320,8 +330,18 @@
             </div>
 
             <div class="section-head first">
-                <span class="sh-left">XUAN 3+1 訊號</span>
-                <input type="text" class="filter-input" id="symbolFilter" placeholder="搜尋幣種，例如 BTC">
+                <span class="sh-left" id="sigTitle">XUAN 3+1 訊號</span>
+                <span class="sh-right">
+                    <span class="tf-bar list-tf strat-bar">
+                        <button class="strat-btn active" data-strat="xuan">3+1</button>
+                        <button class="strat-btn" data-strat="liq">流動性</button>
+                    </span>
+                    <span class="tf-bar list-tf" id="listTfBar">
+                        <button class="tf-btn active" data-tf="5m">5m</button>
+                        <button class="tf-btn" data-tf="15m">15m</button>
+                    </span>
+                    <input type="text" class="filter-input" id="symbolFilter" placeholder="搜尋幣種，例如 BTC">
+                </span>
             </div>
 
             <div id="strategyOverview_xuan">
@@ -355,10 +375,15 @@
                 </div>
             </div>
 
+            <div class="tf-bar">
+                <span>策略</span>
+                <button class="strat-btn active" data-strat="xuan">3+1</button>
+                <button class="strat-btn" data-strat="liq">流動性</button>
+            </div>
             <div class="tf-bar" id="tfBar">
                 <span>週期</span>
-                <button class="tf-btn active" data-tf="all">全部</button>
-                <button class="tf-btn" data-tf="5m">5m</button>
+                <button class="tf-btn" data-tf="all">全部</button>
+                <button class="tf-btn active" data-tf="5m">5m</button>
                 <button class="tf-btn" data-tf="15m">15m</button>
             </div>
 
@@ -375,6 +400,9 @@
 
             <div class="section-head"><span class="sh-left">依分數看績效<span class="count">用來決定 SCORE_MIN 要設多少 (滿分100)</span></span></div>
             <div class="panel" id="byScoreBox"><div class="empty">載入中...</div></div>
+
+            <div class="section-head"><span class="sh-left">依紅綠燈看績效<span class="count">訊號當下 15m/30m/1H/4H/D 偏見，跟訊號同方向＝順勢</span></span></div>
+            <div class="panel" id="byLightsBox"><div class="empty">載入中...</div></div>
 
             <div class="section-head"><span class="sh-left">分幣種績效</span></div>
             <div class="panel" id="perSymbolBox"><div class="empty">載入中...</div></div>
@@ -545,6 +573,7 @@
         }
 
         function scoreRingHtml(s) {
+            if (s.strategy === 'liq') return '';   // 流動性策略沒有評分
             var C = 2 * Math.PI * 24;
             if (s.total_score == null) {
                 return '<div class="sc-mid"><div class="score-ring empty"><svg viewBox="0 0 60 60"><circle class="track" cx="30" cy="30" r="24" fill="none" stroke-width="6"></circle></svg>' +
@@ -604,7 +633,7 @@
                         '<div class="sc-top">' +
                             '<div class="sc-name-group">' +
                                 '<span class="sc-symbol" data-symbol="' + escapeHtml(s.symbol) + '">' + escapeHtml(s.base_symbol) + '</span>' +
-                                tfHtml + tvBadgeHtml(s) +
+                                tfHtml + tvBadgeHtml(s) + lightsHtml(s) +
                             '</div>' +
                             '<span class="dir-badge ' + dirClass + '">' + dirLabel + '</span>' +
                         '</div>' +
@@ -638,6 +667,7 @@
                                 tfHtml + tvBadgeHtml(s) +
                                 '<span class="cc-dir ' + dirClass + '">' + dirLabel + '</span>' +
                                 scoreBadgeHtml(s) +
+                                lightsHtml(s) +
                             '</div>' +
                         '</div>' +
                         '<div class="cc-bottom">' +
@@ -771,6 +801,8 @@
         }
 
         function filterList(list, q) {
+            // 只顯示目前選的週期（很早期沒記週期的訊號當作 5m）
+            list = list.filter(function(s) { return (s.timeframe || '5m') === listTf; });
             if (!q) return list;
             return list.filter(function(s) { return s.base_symbol.toUpperCase().indexOf(q) !== -1; });
         }
@@ -854,6 +886,49 @@
             box.innerHTML = '<table><thead><tr><th>分數區間</th><th>訊號數</th><th>勝率</th><th></th><th>總R數</th></tr></thead><tbody>' + rows + '</tbody></table>';
         }
 
+        var LIGHT_TFS = [['15m', '15m'], ['30m', '30m'], ['1h', '1H'], ['4h', '4H'], ['1d', 'D']];
+
+        function lightsHtml(s) {
+            if (!s.lights) return '';
+            var h = '', tip = [];
+            for (var i = 0; i < LIGHT_TFS.length; i++) {
+                var v = s.lights[LIGHT_TFS[i][0]];
+                h += '<i class="' + (v === 1 ? 'up' : v === -1 ? 'dn' : '') + '"></i>';
+                tip.push(LIGHT_TFS[i][1] + (v === 1 ? ' 多' : v === -1 ? ' 空' : ' ?'));
+            }
+            return '<span class="lights" title="' + tip.join('　') + '">' + h + '</span>';
+        }
+
+        function statRowHtml(label, b) {
+            if (!b.total) return '<tr><td class="mono">' + label + '</td><td class="mono">0</td><td></td><td class="mono">—</td><td class="mono">—</td></tr>';
+            return '<tr>' +
+                       '<td class="mono">' + label + '</td>' +
+                       '<td class="mono">' + b.total + '</td>' +
+                       '<td class="bar-cell"><div class="minibar"><i style="width:' + Math.min(100, b.win_rate).toFixed(0) + '%"></i></div></td>' +
+                       '<td class="mono ' + (b.win_rate >= 50 ? 'pos-text' : 'neg-text') + '">' + b.win_rate.toFixed(1) + '%</td>' +
+                       '<td class="mono ' + (b.r >= 0 ? 'pos-text' : 'neg-text') + '">' + b.r.toFixed(2) + 'R</td>' +
+                   '</tr>';
+        }
+
+        function renderByLights(d) {
+            var box = document.getElementById('byLightsBox');
+            if (!d || !d.n) {
+                box.innerHTML = '<div class="empty">還沒有記錄到紅綠燈的已平倉訊號（紅綠燈上線後的新訊號才會記錄）</div>';
+                return;
+            }
+            var head = '<thead><tr><th></th><th>訊號數</th><th>勝率</th><th></th><th>總R數</th></tr></thead>';
+            var a = '';
+            for (var i = 0; i < d.by_count.length; i++) a += statRowHtml(escapeHtml(d.by_count[i].label), d.by_count[i]);
+            var b = '';
+            for (var j = 0; j < d.by_tf.length; j++) {
+                b += statRowHtml(d.by_tf[j].tf + ' 順勢', d.by_tf[j]['with']);
+                b += statRowHtml(d.by_tf[j].tf + ' 逆勢', d.by_tf[j]['against']);
+            }
+            box.innerHTML = '<div class="lights-sub">共 ' + d.n + ' 筆有紅綠燈紀錄</div>' +
+                            '<div class="lights-sub">順勢燈數（5 顆裡有幾顆跟訊號同方向）</div><table>' + head + '<tbody>' + a + '</tbody></table>' +
+                            '<div class="lights-sub">各時區順勢／逆勢</div><table>' + head + '<tbody>' + b + '</tbody></table>';
+        }
+
         function renderPerSymbol(list) {
             var box = document.getElementById('perSymbolBox');
             if (!list.length) {
@@ -891,6 +966,7 @@
             renderCurve(overall.curve);
             renderDonut(wins, losses);
             renderByScore(overall.by_score);
+            renderByLights(overall.by_lights);
             renderPerSymbol(perSymbol);
         }
 
@@ -1045,9 +1121,12 @@
         document.getElementById('lookupBtn').addEventListener('click', doLookup);
         document.getElementById('lookupInput').addEventListener('keydown', function(e) { if (e.key === 'Enter') doLookup(); });
 
-        var currentTf = 'all';
+        // 週期按鈕：訊號列表（5m／15m）跟統計頁連動；統計頁多一個「全部」，點它只影響統計
+        var currentTf = '5m';
+        var listTf = '5m';
+        var currentStrat = 'xuan';   // 'xuan'＝3+1、'liq'＝流動性；總覽和統計連動
         function buildQueryString() {
-            return buildRangeQuery() + (currentTf !== 'all' ? '&tf=' + currentTf : '');
+            return buildRangeQuery() + (currentTf !== 'all' ? '&tf=' + currentTf : '') + (currentStrat !== 'xuan' ? '&strat=' + currentStrat : '');
         }
         function buildRangeQuery() {
             if (currentRange === 'custom') {
@@ -1065,8 +1144,9 @@
             fetch('/api/data?' + buildQueryString())
                 .then(function(res) { return res.json(); })
                 .then(function(data) {
+                    if ((data.strategy || 'xuan') !== currentStrat) return;   // 切換策略前送出的舊請求，丟掉
                     lastData = data;
-                    notifyNewSignals(data.xuan_open_signals);
+                    if (currentStrat === 'xuan') notifyNewSignals(data.xuan_open_signals);
                     applySymbolFilter();
                     renderStats(data);
                     renderScanList(data);
@@ -1094,9 +1174,25 @@
         var tfButtons = document.querySelectorAll('.tf-btn');
         for (var t = 0; t < tfButtons.length; t++) {
             tfButtons[t].addEventListener('click', function() {
-                for (var u = 0; u < tfButtons.length; u++) tfButtons[u].classList.remove('active');
-                this.classList.add('active');
                 currentTf = this.getAttribute('data-tf');
+                if (currentTf !== 'all') listTf = currentTf;
+                for (var u = 0; u < tfButtons.length; u++) {
+                    var inList = tfButtons[u].parentNode.id === 'listTfBar';
+                    var v = tfButtons[u].getAttribute('data-tf');
+                    tfButtons[u].classList.toggle('active', inList ? v === listTf : v === currentTf);
+                }
+                applySymbolFilter();
+                fetchAndRender();
+            });
+        }
+        var stratButtons = document.querySelectorAll('.strat-btn');
+        for (var sb2 = 0; sb2 < stratButtons.length; sb2++) {
+            stratButtons[sb2].addEventListener('click', function() {
+                currentStrat = this.getAttribute('data-strat');
+                for (var k = 0; k < stratButtons.length; k++) {
+                    stratButtons[k].classList.toggle('active', stratButtons[k].getAttribute('data-strat') === currentStrat);
+                }
+                document.getElementById('sigTitle').textContent = currentStrat === 'liq' ? '流動性訊號' : 'XUAN 3+1 訊號';
                 fetchAndRender();
             });
         }
