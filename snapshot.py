@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import requests
 
+import bias
 import database
 import exchange_client
 
@@ -73,7 +74,41 @@ def _candles(symbol: str, tf: str, since_ms: int, until_ms: int, limit: int) -> 
     return [[int(c[0]), c[1], c[2], c[3], c[4]] for c in raw if since_ms <= c[0] <= until_ms]
 
 
+LIGHT_MS = {'15m': 900_000, '30m': 1_800_000, '1h': 3_600_000, '4h': 14_400_000, '1d': 86_400_000}
+
+
+def compute_lights(symbol: str, ref_ms: int, tfs=None) -> dict:
+    """
+    偏見紅綠燈（跟 TradingView 指標同一套）：每個時區用自己「已收盤」的最後兩根 K 棒判斷
+    1 = 多（綠燈）、-1 = 空（紅燈）。K1 是十字線判斷不出來時，往前找上一次的燈號（沿用）。
+    ref_ms = 訊號那根 K 棒收盤的時間；抓不到資料的時區記 None。日線用 UTC 0 點 = 台灣早上 8 點開盤。
+    """
+    ex = exchange_client.get_exchange()
+    out = {}
+    for tf, ms in LIGHT_MS.items():
+        if tfs and tf not in tfs:
+            continue
+        try:
+            raw = ex.fetch_ohlcv(symbol, timeframe=tf, limit=40) or []
+            closed = [c for c in raw if c[0] + ms <= ref_ms]
+            d = None
+            for j in range(len(closed), 1, -1):
+                d = bias.bias_direction(closed[:j])
+                if d:
+                    break
+            out[tf] = 1 if d == 'long' else -1 if d == 'short' else 0
+        except Exception as e:
+            logger.info(f'[紅綠燈] {symbol} {tf} 抓不到: {e}')
+            out[tf] = None
+    return out
+
+
 def _capture_entry(signal_id: int, symbol: str, tf: str, candle_time: int):
+    step0 = TF_MS.get(tf, 300_000)
+    try:
+        database.set_lights(signal_id, compute_lights(symbol, candle_time + step0))
+    except Exception as e:
+        logger.warning(f'[紅綠燈] {symbol} 紀錄失敗: {e}')
     snap = {'tf': tf, 'taken_at': int(time.time() * 1000)}
     step = TF_MS.get(tf, 300_000)
     try:
