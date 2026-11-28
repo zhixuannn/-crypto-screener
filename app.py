@@ -9,7 +9,7 @@ import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, send_from_directory, Response
 from apscheduler.schedulers.background import BackgroundScheduler
 
 import database
@@ -23,6 +23,7 @@ import xuan_scoring
 import binance_data
 import snapshot
 import liquidity
+import push
 import json
 import hmac
 import re
@@ -190,6 +191,26 @@ def scan_one_symbol_stateful(symbol: str, tf: str = None, force: bool = False):
         return _scan_one_symbol_stateful_impl(symbol, tf, force)
 
 
+def _px(v) -> str:
+    try:
+        return f'{float(v):.6g}'
+    except (TypeError, ValueError):
+        return '-'
+
+
+def _push_new(strategy, symbol, signal, timeframe, score=None):
+    """手機推播：新訊號。"""
+    try:
+        base = symbol.split('/')[0]
+        side = '做多' if signal.direction == 'long' else '做空'
+        sc = (score or {}).get('total') if isinstance(score, dict) else None
+        title = f'{tf_label(timeframe, strategy)}｜{base} {side}' + (f'（{sc} 分）' if sc is not None else '')
+        body = f'進場 {_px(signal.entry_price)}　止損 {_px(signal.sl_price)}　止盈 {_px(signal.tp_price)}'
+        push.notify('new', strategy, timeframe, sc, title, body)
+    except Exception as e:
+        logger.warning(f'[推播] 新訊號通知失敗: {e}')
+
+
 def tf_label(tf, strategy: str = 'xuan') -> str:
     name = '流動性' if strategy == 'liq' else 'XUAN 3+1'
     return f'{name} · {tf or TIMEFRAME}'
@@ -229,6 +250,15 @@ def check_open_signal(row: dict):
             exit_price = tp if hit_tp else sl
             closed_at = int(time.time() * 1000)
             database.close_signal(row['id'], status, closed_at)
+            try:   # 手機推播：止盈／止損
+                base = symbol.split('/')[0]
+                side = '做多' if direction == 'long' else '做空'
+                result = '已止盈 ✅ +1R' if hit_tp else '已止損 ❌ −1R'
+                push.notify('close', row.get('strategy') or 'xuan', tf, row.get('total_score'),
+                            f'{strategy_label}｜{base} {side} {result}',
+                            f'進場 {_px(row["entry_price"])} → 出場 {_px(exit_price)}')
+            except Exception as e:
+                logger.warning(f'[推播] 結單通知失敗: {e}')
             snapshot.capture_exit(row['id'], symbol, tf, row['candle_time'], closed_at)
             notify_set = LIQ_NOTIFY_TIMEFRAMES if row.get('strategy') == 'liq' else NOTIFY_TIMEFRAMES
             if tf in notify_set:
@@ -298,6 +328,7 @@ def process_signals(symbol: str, signals: list, timeframe: str, source: str = 's
             )
         snapshot.capture_entry(signal_id, symbol, timeframe, signal.candle_time)
         counts['found'] += 1
+        _push_new('xuan', symbol, signal, timeframe, score)
         score_text = (str(score['total']) + '/' + str(score['max'])) if score else '無'
         logger.info(f'[{tf_label(timeframe)}] 新訊號({source}): {symbol} {signal.direction} @ {signal.entry_price} 分數={score_text}')
         if timeframe not in NOTIFY_TIMEFRAMES:
@@ -348,6 +379,7 @@ def process_liq_signals(symbol: str, signals: list, timeframe: str) -> dict:
             continue
         snapshot.capture_entry(signal_id, symbol, timeframe, signal.candle_time)
         counts['found'] += 1
+        _push_new('liq', symbol, signal, timeframe)
         logger.info(f'[{tf_label(timeframe, "liq")}] 新訊號: {symbol} {signal.direction} @ {signal.entry_price} SL {signal.sl_price}')
         if timeframe in LIQ_NOTIFY_TIMEFRAMES:
             message = notifier.format_signal_message(
@@ -706,9 +738,21 @@ def api_tv_alerts():
     return jsonify(database.get_recent_tv_alerts(50))
 
 
+def _journal_logged_in() -> bool:
+    """這個瀏覽器有沒有登入交易日誌（跟 /journal 的登入檢查一樣）。沒登入的人看不到「交易日誌」按鈕。"""
+    from flask import session
+    if not session.get('journal_ok'):
+        return False
+    try:
+        from journal import notify as _jnotify
+        return int(session.get('journal_ver') or 0) == _jnotify.session_ver()
+    except Exception:
+        return False
+
+
 @app.route('/')
 def index():
-    return render_template('index.html', timeframe='＋'.join(SCAN_TIMEFRAMES))
+    return render_template('index.html', timeframe='＋'.join(SCAN_TIMEFRAMES), show_journal=_journal_logged_in())
 
 
 @app.route('/api/data')
@@ -761,6 +805,94 @@ def api_score_check():
 def api_lookup():
     """查幣：/api/lookup?symbol=SOL"""
     return jsonify(lookup.lookup(request.args.get('symbol', '')))
+
+
+# ==================== 手機推播 ====================
+SW_JS = '''// 訊號掃描：手機推播用的背景程式（網頁關掉也能收到通知）
+self.addEventListener('install', function (e) { self.skipWaiting(); });
+self.addEventListener('activate', function (e) { e.waitUntil(self.clients.claim()); });
+self.addEventListener('push', function (e) {
+  var d = {};
+  try { d = e.data ? e.data.json() : {}; } catch (err) { d = { title: '訊號掃描', body: e.data ? e.data.text() : '' }; }
+  e.waitUntil(self.registration.showNotification(d.title || '訊號掃描', {
+    body: d.body || '', tag: d.tag || undefined, icon: '/icon-192.png', badge: '/icon-192.png',
+    data: { url: d.url || '/' }
+  }));
+});
+self.addEventListener('notificationclick', function (e) {
+  e.notification.close();
+  var url = (e.notification.data && e.notification.data.url) || '/';
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (list) {
+    for (var i = 0; i < list.length; i++) { if ('focus' in list[i]) { list[i].navigate(url); return list[i].focus(); } }
+    return self.clients.openWindow(url);
+  }));
+});
+'''
+
+MANIFEST = {
+    'name': '訊號掃描', 'short_name': '訊號掃描', 'start_url': '/', 'scope': '/', 'display': 'standalone',
+    'background_color': '#0A0E15', 'theme_color': '#0A0E15', 'lang': 'zh-Hant',
+    'icons': [{'src': '/icon-192.png', 'sizes': '192x192', 'type': 'image/png'},
+              {'src': '/icon-512.png', 'sizes': '512x512', 'type': 'image/png'}],
+}
+
+
+@app.route('/sw.js')
+def service_worker():
+    return Response(SW_JS, mimetype='application/javascript', headers={'Cache-Control': 'no-cache', 'Service-Worker-Allowed': '/'})
+
+
+@app.route('/icon-<int:size>.png')
+def app_icon(size):
+    import app_icons
+    data = {192: app_icons.ICON_192, 512: app_icons.ICON_512}.get(size)
+    if data is None:
+        return Response(status=404)
+    return Response(data, mimetype='image/png', headers={'Cache-Control': 'public, max-age=86400'})
+
+
+@app.route('/manifest.webmanifest')
+def web_manifest():
+    return Response(json.dumps(MANIFEST, ensure_ascii=False), mimetype='application/manifest+json')
+
+
+@app.route('/api/push/key')
+def push_key():
+    try:
+        return jsonify({'ok': True, 'key': push.public_key()})
+    except Exception as e:
+        logger.warning(f'[推播] 取金鑰失敗: {e}')
+        return jsonify({'ok': False, 'error': '推播暫時不能用'}), 503
+
+
+@app.route('/api/push/subscribe', methods=['POST'])
+def push_subscribe():
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        prefs = push.subscribe(data.get('subscription') or {}, data.get('prefs') or {})
+        return jsonify({'ok': True, 'prefs': prefs})
+    except ValueError as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+
+
+@app.route('/api/push/unsubscribe', methods=['POST'])
+def push_unsubscribe():
+    data = request.get_json(force=True, silent=True) or {}
+    push.unsubscribe(str(data.get('endpoint') or ''))
+    return jsonify({'ok': True})
+
+
+@app.route('/api/push/prefs', methods=['POST'])
+def push_prefs():
+    data = request.get_json(force=True, silent=True) or {}
+    return jsonify({'ok': True, 'prefs': push.get_prefs(str(data.get('endpoint') or ''))})
+
+
+@app.route('/api/push/test', methods=['POST'])
+def push_test():
+    data = request.get_json(force=True, silent=True) or {}
+    ok = push.send_test(str(data.get('endpoint') or ''))
+    return jsonify({'ok': ok, 'error': None if ok else '找不到這台裝置的訂閱，請重新開啟通知'})
 
 
 @app.route('/health')
