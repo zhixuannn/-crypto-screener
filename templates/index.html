@@ -4,6 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>訊號掃描</title>
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="apple-touch-icon" href="/icon-192.png">
+    <meta name="theme-color" content="#0A0E15">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="訊號掃描">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <script src="https://s3.tradingview.com/tv.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
@@ -286,16 +293,46 @@
         .bg-btn .sw span { width: 60%; height: 24px; border-radius: 6px; display: block; }
         .ghost-btn { height: 40px; padding: 0 16px; border-radius: 10px; background: transparent; font-size: 13px; cursor: pointer; color: var(--text); border: 1px solid var(--border); }
         .ghost-btn:hover { border-color: var(--accent); color: var(--accent); }
+        .ghost-btn:disabled { opacity: 0.45; cursor: not-allowed; border-color: var(--border); color: var(--text-dim); }
+
+        /* ---------- 設定頁：手機通知 ---------- */
+        .push-panel { display: flex; flex-direction: column; gap: 22px; padding: 24px; margin-top: 20px; }
+        .push-top { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+        .push-state { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; }
+        .push-state i { width: 10px; height: 10px; border-radius: 50%; background: var(--text-dim); display: inline-block; }
+        .push-state.on i { background: var(--long); box-shadow: 0 0 0 4px var(--long-soft); }
+        .push-state.bad i { background: var(--short); }
+        .push-main-btn { height: 40px; padding: 0 18px; border-radius: 10px; border: none; background: var(--accent); color: var(--on-accent); font-size: 13px; font-weight: 700; cursor: pointer; }
+        .push-main-btn.off { background: transparent; color: var(--text); border: 1px solid var(--border); }
+        .push-main-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+        .push-note { font-size: 12.5px; line-height: 1.6; color: var(--text-dim); background: var(--cell); border-radius: 10px; padding: 10px 12px; }
+        .push-note b { color: var(--text); }
+        .push-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 22px; }
+        .chips { display: flex; gap: 8px; flex-wrap: wrap; }
+        .chip { display: inline-flex; align-items: center; gap: 7px; height: 36px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--border); font-size: 13px; font-weight: 600; color: var(--text-dim); cursor: pointer; user-select: none; }
+        .chip input { accent-color: var(--accent); width: 15px; height: 15px; margin: 0; }
+        .chip:has(input:checked) { color: var(--text); border-color: var(--accent); background: var(--accent-soft); }
+        .score-in { width: 90px; height: 36px; border-radius: 10px; border: 1px solid var(--border); background: var(--cell); color: var(--text); padding: 0 12px; font-size: 14px; font-family: 'JetBrains Mono', monospace; }
+        .push-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+        .push-msg { font-size: 12.5px; color: var(--text-dim); }
+        .push-msg.ok { color: var(--long); } .push-msg.err { color: var(--short); }
+        .push-dim { opacity: 0.5; pointer-events: none; }
+
+        /* 手機版選單打開時後面的暗色遮罩（電腦版不會出現） */
+        .sb-backdrop { display: none; }
 
         /* ---------- 手機版 ---------- */
         @media (max-width: 760px) {
             body { flex-direction: column; }
-            .sidebar { width: 100%; padding: 12px; border-right: none; border-bottom: 1px solid var(--border); }
-            .sidebar.collapsed { width: 100%; height: 0; padding: 0; overflow: hidden; }
-            .sidebar-inner { width: 100%; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-            .brand { margin: 0 6px 0 0; }
-            .sidebar .sub { display: none; }
-            .nav-item { width: auto; margin: 0; }
+            /* 手機：選單藏在左邊，按 ☰ 才滑出來 */
+            .sidebar, .sidebar.collapsed { position: fixed; top: 0; left: 0; bottom: 0; z-index: 900; width: 250px; height: auto;
+                padding: 24px 16px; border-right: 1px solid var(--border); overflow-y: auto;
+                transform: translateX(-105%); transition: transform 0.22s ease; }
+            .sidebar.open { transform: none; box-shadow: 0 0 40px rgba(0,0,0,0.45); }
+            .sidebar-inner { width: 100%; }
+            .sb-backdrop { position: fixed; inset: 0; z-index: 899; background: rgba(0,0,0,0.45); }
+            .sb-backdrop.show { display: block; }
+            .push-panel { padding: 18px; }
             .main { padding: 16px 14px 60px; }
             .two-col { grid-template-columns: 1fr; }
             .filter-input { width: 100%; }
@@ -358,9 +395,11 @@
             <button class="nav-item active" data-page="overview"><span class="ico">◈</span>總覽</button>
             <button class="nav-item" data-page="stats"><span class="ico">▤</span>統計</button>
             <button class="nav-item" data-page="settings"><span class="ico">⚙</span>設定</button>
-            <a class="nav-item journal-link" href="/journal/"><span class="ico">✎</span>交易日誌</a>
+            {% if show_journal %}<a class="nav-item journal-link" href="/journal/"><span class="ico">✎</span>交易日誌</a>{% endif %}
         </div>
     </div>
+
+    <div class="sb-backdrop" id="sbBackdrop"></div>
 
     <div class="main">
         <div class="topbar">
@@ -503,19 +542,74 @@
                     </div>
                 </section>
             </div>
+
+            <section class="panel push-panel" id="pushPanel">
+                <div class="push-top">
+                    <div>
+                        <h3 style="margin:0 0 6px;font-size:14px;font-weight:600">手機通知</h3>
+                        <div class="push-state" id="pushState"><i></i><span>檢查中…</span></div>
+                    </div>
+                    <button type="button" class="push-main-btn" id="pushToggle" disabled>開啟通知</button>
+                </div>
+                <div class="push-note" id="pushNote" style="display:none"></div>
+                <div class="push-grid" id="pushPrefsBox">
+                    <div class="set-block">
+                        <h3>要通知什麼</h3>
+                        <div class="chips">
+                            <label class="chip"><input type="checkbox" data-pref="new" checked>新訊號</label>
+                            <label class="chip"><input type="checkbox" data-pref="close" checked>止盈／止損打到</label>
+                        </div>
+                    </div>
+                    <div class="set-block">
+                        <h3>策略</h3>
+                        <div class="chips">
+                            <label class="chip"><input type="checkbox" data-pstrat="xuan" checked>3+1</label>
+                            <label class="chip"><input type="checkbox" data-pstrat="liq" checked>流動性</label>
+                        </div>
+                    </div>
+                    <div class="set-block">
+                        <h3>週期</h3>
+                        <div class="chips">
+                            <label class="chip"><input type="checkbox" data-tfp="5m" checked>5m</label>
+                            <label class="chip"><input type="checkbox" data-tfp="15m" checked>15m</label>
+                        </div>
+                    </div>
+                    <div class="set-block">
+                        <h3>3+1 最低分數</h3>
+                        <div style="display:flex;align-items:center;gap:10px">
+                            <input type="number" class="score-in" id="pushMinScore" min="0" max="40" step="1" value="0" inputmode="numeric">
+                            <span class="set-hint">/ 40　填 0 ＝不限</span>
+                        </div>
+                        <span class="set-hint">分數低於這個的 3+1 訊號不通知（流動性沒有分數，不受影響）</span>
+                    </div>
+                </div>
+                <div class="push-actions">
+                    <button type="button" class="ghost-btn" id="pushSave" disabled>儲存通知設定</button>
+                    <button type="button" class="ghost-btn" id="pushTest" disabled>傳一則測試通知</button>
+                    <span class="push-msg" id="pushMsg"></span>
+                </div>
+                <span class="set-hint">每台手機／電腦要各自開一次；每台可以選不一樣的條件。網站關掉也收得到。</span>
+            </section>
         </div>
     </div>
 
     <script>
         var currentRange = 'today';
         var lastData = null;
-        var knownOpenSignalIds = null;
 
+        var mobileMq = window.matchMedia('(max-width: 760px)');
+        function setDrawer(open) {
+            document.getElementById('sidebar').classList.toggle('open', open);
+            document.getElementById('sbBackdrop').classList.toggle('show', open);
+        }
         document.getElementById('sidebarToggle').addEventListener('click', function() {
             var sb = document.getElementById('sidebar');
+            if (mobileMq.matches) { setDrawer(!sb.classList.contains('open')); return; }   // 手機：滑出／收起選單
             sb.classList.toggle('collapsed');
             try { localStorage.setItem('sidebarCollapsed', sb.classList.contains('collapsed') ? '1' : '0'); } catch (e) {}
         });
+        document.getElementById('sbBackdrop').addEventListener('click', function() { setDrawer(false); });
+        mobileMq.addEventListener && mobileMq.addEventListener('change', function() { setDrawer(false); });
         try {
             if (localStorage.getItem('sidebarCollapsed') === '1') {
                 document.getElementById('sidebar').classList.add('collapsed');
@@ -531,7 +625,9 @@
                 document.getElementById('pageOverview').style.display = page === 'overview' ? 'block' : 'none';
                 document.getElementById('pageStats').style.display = page === 'stats' ? 'block' : 'none';
                 document.getElementById('pageSettings').style.display = page === 'settings' ? 'block' : 'none';
-                if (page === 'settings') renderSettings();
+                if (page === 'settings') { renderSettings(); pushRefresh(); }
+                if (mobileMq.matches) setDrawer(false);
+                window.scrollTo(0, 0);
             });
         }
 
@@ -636,35 +732,165 @@
             return parseFloat(fixed).toString();
         }
 
-        function requestNotifyPermission() {
-            if ('Notification' in window && Notification.permission === 'default') {
-                Notification.requestPermission();
-            }
+        // ---------- 手機推播通知（設定頁「手機通知」）----------
+        // 每台裝置自己開：瀏覽器給一組「訂閱」，連同這台選的條件存到伺服器；有訊號時伺服器直接推到手機，網站關掉也收得到
+        var PUSH_OK = ('serviceWorker' in navigator) && ('PushManager' in window) && ('Notification' in window);
+        var IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        var IS_STANDALONE = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+        var swReady = null, pushSub = null, pushBusy = false;
+        if ('serviceWorker' in navigator) {
+            swReady = navigator.serviceWorker.register('/sw.js').then(function() { return navigator.serviceWorker.ready; })
+                .catch(function(e) { console.warn('背景程式註冊失敗', e); return null; });
         }
-        requestNotifyPermission();
 
-        function notifyNewSignals(openSignals) {
-            if (!('Notification' in window) || Notification.permission !== 'granted') return;
-            var currentIds = {};
-            for (var i = 0; i < openSignals.length; i++) currentIds[openSignals[i].id] = true;
+        function b64ToBytes(b64) {
+            var pad = '='.repeat((4 - b64.length % 4) % 4);
+            var raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+            var out = new Uint8Array(raw.length);
+            for (var i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+            return out;
+        }
+        function postJson(url, body) {
+            return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+                .then(function(r) { return r.json(); });
+        }
+        function pushPrefsFromUI() {
+            var box = document.getElementById('pushPrefsBox');
+            function picked(attr) {
+                var out = [], el = box.querySelectorAll('input[' + attr + ']');
+                for (var i = 0; i < el.length; i++) if (el[i].checked) out.push(el[i].getAttribute(attr));
+                return out;
+            }
+            var ms = parseInt(document.getElementById('pushMinScore').value, 10);
+            return {
+                'new': box.querySelector('[data-pref="new"]').checked,
+                'close': box.querySelector('[data-pref="close"]').checked,
+                strategies: picked('data-pstrat'), timeframes: picked('data-tfp'),
+                min_score: isNaN(ms) ? 0 : Math.max(0, Math.min(40, ms))
+            };
+        }
+        function pushPrefsToUI(p) {
+            if (!p) return;
+            var box = document.getElementById('pushPrefsBox');
+            box.querySelector('[data-pref="new"]').checked = !!p['new'];
+            box.querySelector('[data-pref="close"]').checked = !!p['close'];
+            var s = box.querySelectorAll('input[data-pstrat]');
+            for (var i = 0; i < s.length; i++) s[i].checked = (p.strategies || []).indexOf(s[i].getAttribute('data-pstrat')) >= 0;
+            var t = box.querySelectorAll('input[data-tfp]');
+            for (var j = 0; j < t.length; j++) t[j].checked = (p.timeframes || []).indexOf(t[j].getAttribute('data-tfp')) >= 0;
+            document.getElementById('pushMinScore').value = p.min_score || 0;
+        }
+        function pushMsg(text, cls) {
+            var el = document.getElementById('pushMsg');
+            el.textContent = text || ''; el.className = 'push-msg' + (cls ? ' ' + cls : '');
+        }
+        function pushView(state, text, note) {
+            var st = document.getElementById('pushState'), btn = document.getElementById('pushToggle');
+            st.className = 'push-state' + (state === 'on' ? ' on' : state === 'bad' ? ' bad' : '');
+            st.querySelector('span').textContent = text;
+            var nt = document.getElementById('pushNote');
+            nt.style.display = note ? 'block' : 'none'; nt.innerHTML = note || '';
+            var on = state === 'on';
+            btn.textContent = on ? '關閉通知' : '開啟通知';
+            btn.classList.toggle('off', on);
+            btn.disabled = state === 'bad' || state === 'na' || pushBusy;
+            document.getElementById('pushSave').disabled = !on || pushBusy;
+            document.getElementById('pushTest').disabled = !on || pushBusy;
+        }
 
-            if (knownOpenSignalIds !== null) {
-                for (var j = 0; j < openSignals.length; j++) {
-                    var s = openSignals[j];
-                    if (!knownOpenSignalIds[s.id]) {
-                        var dirLabel = s.direction === 'long' ? '做多' : '做空';
-                        var scoreText = s.total_score != null ? ' 分數' + s.total_score + '/' + (s.score_max || 100) + (s.warning ? ' ⚠️' + s.warning : '') : '';
-                        try {
-                            new Notification('新訊號: ' + s.base_symbol, {
-                                body: dirLabel + ' @ ' + s.entry_price + scoreText,
-                                tag: 'signal-' + s.id
-                            });
-                        } catch (e) { console.error('通知發送失敗', e); }
-                    }
+        function pushRefresh() {
+            if (IS_IOS && !IS_STANDALONE || !PUSH_OK || !swReady) {
+                if (IS_IOS && !IS_STANDALONE) {
+                    pushView('na', '還不能開', 'iPhone 要先把網站<b>加到主畫面</b>：用 Safari 打開這個網站 → 按下面的「分享」⬆ → 「加入主畫面」，' +
+                             '之後<b>從主畫面的圖示打開</b>，再回來這裡按「開啟通知」（需要 iOS 16.4 以上）。');
+                } else {
+                    pushView('na', '這個瀏覽器不支援推播', '請改用 Chrome、Edge、Safari 或 Firefox 的新版本。');
                 }
+                return Promise.resolve();
             }
-            knownOpenSignalIds = currentIds;
+            if (Notification.permission === 'denied') {
+                pushView('bad', '通知被封鎖了', '你之前按了「封鎖」。要到瀏覽器（或手機設定）裡，把這個網站的通知改成「允許」，再回來重新整理。');
+                return Promise.resolve();
+            }
+            return swReady.then(function(reg) {
+                if (!reg) { pushView('na', '背景程式載入失敗', '重新整理頁面再試一次。'); return; }
+                return reg.pushManager.getSubscription().then(function(sub) {
+                    pushSub = sub;
+                    if (!sub) { pushView('off', '這台裝置還沒開通知'); return; }
+                    pushView('on', '已開啟：這台裝置會收到通知');
+                    return postJson('/api/push/prefs', { endpoint: sub.endpoint }).then(function(r) {
+                        if (r && r.prefs) { pushPrefsToUI(r.prefs); return; }
+                        // 伺服器那邊沒這台的紀錄（例如資料被清掉）：用畫面上的條件自動補回去
+                        return postJson('/api/push/subscribe', { subscription: sub.toJSON(), prefs: pushPrefsFromUI() });
+                    });
+                });
+            }).catch(function(e) { console.warn(e); });
         }
+
+        function pushEnable() {
+            pushMsg('');
+            // 一定要在按下按鈕的當下就問權限（iPhone 規定）
+            return Notification.requestPermission().then(function(perm) {
+                if (perm !== 'granted') { pushRefresh(); throw new Error('沒有允許通知'); }
+                return Promise.all([swReady, fetch('/api/push/key').then(function(r) { return r.json(); })]);
+            }).then(function(res) {
+                var reg = res[0], key = res[1];
+                if (!reg) throw new Error('背景程式載入失敗，重新整理再試');
+                if (!key || !key.ok) throw new Error((key && key.error) || '推播暫時不能用');
+                return reg.pushManager.getSubscription().then(function(old) {
+                    return old ? old.unsubscribe() : null;          // 舊的訂閱先拿掉，避免金鑰對不上
+                }).then(function() {
+                    return reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(key.key) });
+                });
+            }).then(function(sub) {
+                return postJson('/api/push/subscribe', { subscription: sub.toJSON(), prefs: pushPrefsFromUI() });
+            }).then(function(r) {
+                if (!r || !r.ok) throw new Error((r && r.error) || '存不進伺服器');
+                pushMsg('通知開好了 ✓ 可以按「傳一則測試通知」試試看', 'ok');
+            });
+        }
+        function pushDisable() {
+            pushMsg('');
+            var sub = pushSub;
+            if (!sub) return Promise.resolve();
+            var ep = sub.endpoint;
+            return sub.unsubscribe().catch(function() {}).then(function() {
+                return postJson('/api/push/unsubscribe', { endpoint: ep });
+            }).then(function() { pushMsg('這台裝置的通知已關閉'); });
+        }
+        function pushRun(fn) {
+            if (pushBusy) return;
+            pushBusy = true; pushView(pushSub ? 'on' : 'off', '處理中…');
+            fn().catch(function(e) { pushMsg(e && e.message ? e.message : '失敗了，再試一次', 'err'); })
+                .then(function() { pushBusy = false; return pushRefresh(); });
+        }
+        document.getElementById('pushToggle').addEventListener('click', function() {
+            pushRun(pushSub ? pushDisable : pushEnable);
+        });
+        document.getElementById('pushSave').addEventListener('click', function() {
+            var p = pushPrefsFromUI();
+            if (!p['new'] && !p['close']) { pushMsg('「要通知什麼」至少勾一個', 'err'); return; }
+            if (!p.strategies.length || !p.timeframes.length) { pushMsg('策略和週期都至少要勾一個', 'err'); return; }
+            pushRun(function() {
+                return postJson('/api/push/subscribe', { subscription: pushSub.toJSON(), prefs: p }).then(function(r) {
+                    if (!r || !r.ok) throw new Error((r && r.error) || '儲存失敗');
+                    pushMsg('已儲存 ✓', 'ok');
+                });
+            });
+        });
+        document.getElementById('pushTest').addEventListener('click', function() {
+            pushRun(function() {
+                return postJson('/api/push/test', { endpoint: pushSub.endpoint }).then(function(r) {
+                    if (!r || !r.ok) throw new Error((r && r.error) || '測試通知送不出去');
+                    pushMsg('已送出，幾秒內手機應該會跳通知', 'ok');
+                });
+            });
+        });
+        // 3+1 沒勾的時候，分數門檻反灰
+        document.getElementById('pushPrefsBox').addEventListener('change', function() {
+            var xuan = document.querySelector('#pushPrefsBox [data-pstrat="xuan"]').checked;
+            document.getElementById('pushMinScore').closest('.set-block').classList.toggle('push-dim', !xuan);
+        });
 
         function cgUrl(base) {
             var b = String(base).split('/')[0].replace(/^1000000|^1000/, '');
@@ -1367,7 +1593,6 @@
                 .then(function(data) {
                     if ((data.strategy || 'xuan') !== currentStrat) return;   // 切換策略前送出的舊請求，丟掉
                     lastData = data;
-                    if (currentStrat === 'xuan') notifyNewSignals(data.xuan_open_signals);
                     applySymbolFilter();
                     renderStats(data);
                     renderScanList(data);
